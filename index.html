@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PocketCFO</title>
+  <style>
+    /* Basic styles for Module 2 */
+    #module2-section { display: none; margin-top: 20px; }
+    .card { border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; margin-bottom: 10px; display:flex; justify-content:space-between; align-items:center }
+    .badge { padding: 6px 10px; border-radius: 999px; color: white; font-weight:600 }
+    .amount.income { color: #059669 }
+    .amount.expense { color: #dc2626 }
+    .confidence { height: 4px; border-radius: 4px; background: #e5e7eb; margin-top: 8px; }
+    .confidence > .bar { height: 4px; border-radius: 4px }
+    #personal-warning { display:none; padding:10px; border-radius:6px; background:#FEF3C7; border:1px solid #F59E0B; margin-bottom:12px }
+    #save-all-btn { padding:8px 12px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer }
+    .spinner { border:2px solid #f3f3f3; border-top:2px solid #2563eb; border-radius:50%; width:14px; height:14px; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle }
+    @keyframes spin { to { transform: rotate(360deg) } }
+    /* Summary chart */
+    .summary-row { display:flex; align-items:center; margin:6px 0 }
+    .summary-label { width:120px }
+    .summary-bar { height:16px; background:#d1d5db; border-radius:8px; margin:0 8px; flex:1; position:relative }
+    .summary-bar > .fill { height:100%; border-radius:8px; background:#60a5fa }
+    /* Financial summary styles */
+    #financial-summary { display:none; margin:20px 0; }
+    #financial-summary .boxes { display:flex; gap:10px; flex-wrap:wrap }
+    #financial-summary .box { border-radius:10px; padding:15px; flex:1; min-width:120px; box-shadow:0 2px 4px rgba(0,0,0,0.1) }
+    #financial-summary .box .value { font-size:22px; font-weight:bold }
+    #financial-summary .box .label { font-size:12px; margin-top:4px }
+    /* Input section styles */
+    body { background:#0A0F1E; color:white; font-family:sans-serif; padding:20px; margin:0 }
+    #input-section { margin-bottom:30px; padding:20px; background:#1a1f2e; border-radius:8px; border:1px solid #333 }
+    h1 { margin-top:0; font-size:24px }
+    #input-text { width:100%; height:80px; padding:10px; background:#0d1117; color:white; border:1px solid #444; border-radius:6px; font-family:monospace; font-size:14px; resize:vertical }
+    #parse-btn { padding:10px 20px; background:#00D4AA; color:black; border:none; border-radius:6px; font-weight:600; cursor:pointer; margin-top:10px; font-size:16px }
+    #parse-btn:hover { background:#00c99e }
+    #mic-btn { padding:10px 20px; background:#9CA3AF; color:black; border:none; border-radius:6px; font-weight:600; cursor:pointer; margin-top:10px; font-size:16px; margin-left:8px }
+    #mic-btn:hover { background:#8b949a }
+    #output { background:#1a1f2e; padding:15px; border-radius:8px; white-space:pre-wrap; word-wrap:break-word; font-family:monospace; font-size:12px; max-height:400px; overflow-y:auto; border:1px solid #444; margin-bottom:20px }
+  </style>
+</head>
+<body>
+
+  <!-- Input section -->
+  <div id="input-section">
+    <h1>💼 PocketCFO — Smart Categorization</h1>
+    <textarea id="input-text" placeholder="Type anything... e.g. bought flour for 200 and sold cakes for 500"></textarea>
+    <button id="parse-btn" onclick="parseText()">🔍 Parse</button>
+    <button id="mic-btn" onclick="startVoiceInput()">🎤 Voice</button>
+  </div>
+
+  <!-- Existing output div (keep) -->
+  <div id="output"></div>
+
+  <!-- Module 2 section (hidden by default) -->
+  <div id="module2-section">
+    <h2>🏷️ Smart Categories</h2>
+    <p>AI has auto-categorized your transactions</p>
+
+    <div id="personal-warning"></div>
+
+    <!-- Small label used by JS to indicate Current Batch / All Time Total -->
+    <div id="summary-label" style="margin:8px 0; font-weight:600; display:block">📋 Current Batch</div>
+
+    <div id="category-cards"></div>
+
+    <!-- Financial summary -->
+    <div id="financial-summary">
+      <h3>💰 Financial Summary</h3>
+      <div class="boxes">
+        <div class="box" id="box-revenue"><div class="value">₹0</div><div class="label">Total Revenue</div></div>
+        <div class="box" id="box-expenses"><div class="value">₹0</div><div class="label">Total Expenses</div></div>
+        <div class="box" id="box-profit"><div class="value">₹0</div><div class="label">Net Profit / Loss</div></div>
+        <div class="box" id="box-balance"><div class="value">₹0</div><div class="label">Balance in Hand</div></div>
+      </div>
+      <div id="summary-insight" style="margin-top:10px;"></div>
+    </div>
+
+    <button id="save-all-btn">💾 Save All Transactions</button>
+
+    <h3 id="summary-title" style="display:none">📊 Spending by Category</h3>
+    <div id="summary-chart" style="display:none"></div>
+  </div>
+
+  <script>
+    // categories and colors
+    const CATEGORY_COLORS = {
+      "Revenue": '#00D4AA',
+      "Inventory": '#3B82F6',
+      "Utilities": '#F59E0B',
+      "Rent": '#7C3AED',
+      "Personal": '#EF4444',
+      "Transport": '#F97316',
+      "Salaries": '#6366F1',
+      "Food": '#EC4899',
+      "Maintenance": '#84CC16',
+      "Other": '#6B7280'
+    };
+
+    let currentTransactions = [];
+
+    async function parseText() {
+      const text = document.getElementById('input-text').value.trim();
+
+      // 1. empty input
+      if (!text) {
+        alert("⚠️ Please enter a transaction first!");
+        return;
+      }
+
+      // 2. must contain digit or amount word
+      const amountWords = [
+        "zero","one","two","three","four","five","six","seven",
+        "eight","nine","ten","twenty","thirty","forty","fifty",
+        "sixty","seventy","eighty","ninety","hundred","thousand",
+        "lakh","rupees","bucks","dollars"
+      ];
+      const hasNumber = /\d/.test(text);
+      const lower = text.toLowerCase();
+      const hasAmountWord = amountWords.some(w => lower.includes(w));
+      if (!hasNumber && !hasAmountWord) {
+        alert("⚠️ Please include an amount in your transaction.\n\nExample: 'bought flour for ₹200' or 'sold cakes for 500'");
+        return;
+      }
+
+      // 3. too short
+      if (text.length < 5) {
+        alert("⚠️ Please describe your transaction in more detail.");
+        return;
+      }
+
+      // 4. greeting/random single words
+      const greetings = ["hi","hello","hey","ok","okay","yes","no","thanks",
+        "bye","good","bad","test","lol","haha"];
+      if (greetings.includes(lower)) {
+        alert("⚠️ That doesn't look like a transaction.\n\nTry: 'sold 10 coffees for ₹300' or 'paid rent ₹5000'");
+        return;
+      }
+
+      try {
+        const res = await fetch('http://127.0.0.1:5000/parse', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text})
+        });
+        const data = await res.json();
+        document.getElementById('output').innerText = JSON.stringify(data, null, 2);
+        const transactions = data.parsed || data.transactions || [];
+        if (transactions.length > 0) {
+          window.onParseResults(transactions);
+        }
+      } catch (err) {
+        alert('Error connecting to server: ' + err.message);
+      }
+    }
+
+    function startVoiceInput() {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert('Voice input not supported. Please use Chrome browser.');
+        return;
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      
+      recognition.lang = 'en-IN';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      const micBtn = document.getElementById('mic-btn');
+      micBtn.innerHTML = '🔴 Listening...';
+      micBtn.style.background = '#ef4444';
+      micBtn.style.color = 'white';
+      micBtn.disabled = true;
+
+      recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        document.getElementById('input-text').value = transcript;
+        micBtn.innerHTML = '🎤 Voice';
+        micBtn.style.background = '';
+        micBtn.disabled = false;
+        setTimeout(() => parseText(), 1000);
+      };
+
+      recognition.onerror = function(event) {
+        micBtn.innerHTML = '🎤 Voice';
+        micBtn.style.background = '';
+        micBtn.disabled = false;
+        alert('Microphone error: ' + event.error + '\nMake sure you allowed microphone permission.');
+      };
+
+      recognition.onend = function() {
+        micBtn.innerHTML = '🎤 Voice';
+        micBtn.style.background = '';
+        micBtn.disabled = false;
+      };
+
+      recognition.start();
+    }
+
+    async function runCategorization(transactions) {
+      try {
+        const res = await fetch('http://127.0.0.1:5000/categorize', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({transactions})
+        });
+        const data = await res.json();
+        if (data && data.transactions) {
+          currentTransactions = data.transactions;
+          renderCategoryCards(currentTransactions);
+          document.getElementById('module2-section').style.display = 'block';
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function editCategory(i) {
+      document.getElementById(`badge-${i}`).style.display = 'none';
+      document.getElementById(`edit-btn-${i}`).style.display = 'none';
+      document.getElementById(`dropdown-${i}`).style.display = 'inline-block';
+      document.getElementById(`save-btn-${i}`).style.display = 'inline-block';
+      document.getElementById(`cancel-btn-${i}`).style.display = 'inline-block';
+    }
+
+    function cancelEdit(i) {
+      document.getElementById(`badge-${i}`).style.display = 'inline-block';
+      document.getElementById(`edit-btn-${i}`).style.display = 'inline-block';
+      document.getElementById(`dropdown-${i}`).style.display = 'none';
+      document.getElementById(`save-btn-${i}`).style.display = 'none';
+      document.getElementById(`cancel-btn-${i}`).style.display = 'none';
+    }
+
+    function saveCategory(i) {
+      const tx = currentTransactions[i];
+      const newCategory = document.getElementById(`dropdown-${i}`).value;
+      tx.category = newCategory;
+      const badge = document.getElementById(`badge-${i}`);
+      badge.innerText = newCategory;
+      badge.style.background = CATEGORY_COLORS[newCategory] || CATEGORY_COLORS.Other;
+      cancelEdit(i);
+      fetch('http://127.0.0.1:5000/correct-category', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({transaction_id: tx.id||'', new_category: newCategory, keyword: tx.description})
+      })
+      .then(r=>r.json())
+      .then(data=>{
+        if(data && data.success) alert('✅ Category updated!');
+      })
+      .catch(e=>{console.error(e); alert('❌ Update failed');});
+    }
+
+    function renderCategoryCards(transactions) {
+      const container = document.getElementById('category-cards');
+      container.innerHTML = '';
+      let personalCount = 0;
+      let personalTotal = 0;
+      transactions.forEach((t, idx) => {
+        const div = document.createElement('div');
+        div.className = 'card';
+
+        const left = document.createElement('div');
+        left.innerHTML = `<div><strong>${t.description}</strong></div>`;
+
+        const right = document.createElement('div');
+        const amtClass = (t.type && t.type.toLowerCase() === 'income') ? 'income' : 'expense';
+        const badgeColor = CATEGORY_COLORS[t.category] || CATEGORY_COLORS['Other'];
+
+        if (t.category === 'Personal') { personalCount += 1; personalTotal += Number(t.amount || 0); }
+
+        right.innerHTML = `
+          <div class="amount ${amtClass}">₹${t.amount || 0}</div>
+          <div id="badge-${idx}" class="badge" style="background:${badgeColor}">${t.category}</div>
+          <div class="confidence"><div class="bar" style="width:${Math.min(100, (t.confidence_score||0)*100)}%; background:${confidenceColor(t.confidence_score||0)}"></div></div>
+          <button id="edit-btn-${idx}" onclick="editCategory(${idx})">✏️ Edit</button>
+          <select id="dropdown-${idx}" style="display:none; margin-top:6px;">
+            ${Object.keys(CATEGORY_COLORS).map(c=>`<option value="${c}" ${c===t.category? 'selected':''}>${c}</option>`).join('')}
+          </select>
+          <button id="save-btn-${idx}" style="display:none;" onclick="saveCategory(${idx})">✅ Save</button>
+          <button id="cancel-btn-${idx}" style="display:none;" onclick="cancelEdit(${idx})">❌ Cancel</button>
+        `;
+
+        div.appendChild(left);
+        div.appendChild(right);
+        container.appendChild(div);
+      });
+
+      const warn = document.getElementById('personal-warning');
+      if (personalCount > 0) {
+        warn.style.display = 'block';
+        warn.innerText = `⚠️ ${personalCount} personal expense(s) detected totalling ₹${personalTotal} — may affect true business profit`;
+      } else {
+        warn.style.display = 'none';
+      }
+      calculateSummary(currentTransactions);
+    }
+
+    function calculateSummary(transactions){
+      document.getElementById('summary-label').innerText = '📋 Current Batch';
+      let rev=0, exp=0;
+      transactions.forEach(t=>{
+        const amt = Number(t.amount)||0;
+        if(t.type && t.type.toLowerCase()==='income') rev+=amt;
+        else exp+=amt;
+      });
+      const profit = rev-exp;
+      const bal = profit;
+      document.getElementById('box-revenue').querySelector('.value').innerText = `₹${rev}`;
+      document.getElementById('box-expenses').querySelector('.value').innerText = `₹${exp}`;
+      const profitBox = document.getElementById('box-profit');
+      profitBox.querySelector('.value').innerText = `₹${profit}`;
+      if(profit>=0){ profitBox.style.background='#dcfce7'; profitBox.style.color='#16a34a'; } else { profitBox.style.background='#fee2e2'; profitBox.style.color='#dc2626'; }
+      document.getElementById('box-balance').querySelector('.value').innerText = `₹${bal}`;
+      document.getElementById('box-balance').style.background='#dbeafe';
+      document.getElementById('box-balance').style.color='#1d4ed8';
+      const insight=document.getElementById('summary-insight');
+      if(profit>0){ insight.innerText='✅ Good job! You earned more than you spent today.'; }
+      else if(profit<0){ insight.innerText='⚠️ You spent more than you earned. Keep an eye on expenses.'; }
+      else{ insight.innerText='➡️ You broke even today.'; }
+      document.getElementById('financial-summary').style.display='block';
+    }
+
+    async function fetchOverallSummary(){
+      try{
+        const res = await fetch('http://127.0.0.1:5000/summary');
+        const d = await res.json();
+        if(d && d.success && d.summary){
+          const s = d.summary;
+          document.getElementById('box-revenue').querySelector('.value').innerText = `₹${s.total_revenue}`;
+          document.getElementById('box-expenses').querySelector('.value').innerText = `₹${s.total_expenses}`;
+          const profitBox = document.getElementById('box-profit');
+          profitBox.querySelector('.value').innerText = `₹${s.net_profit}`;
+          if(s.net_profit>=0){ profitBox.style.background='#dcfce7'; profitBox.style.color='#16a34a'; } else { profitBox.style.background='#fee2e2'; profitBox.style.color='#dc2626'; }
+          document.getElementById('box-balance').querySelector('.value').innerText = `₹${s.net_profit}`;
+          document.getElementById('box-balance').style.background='#dbeafe';
+          document.getElementById('box-balance').style.color='#1d4ed8';
+          const insight=document.getElementById('summary-insight');
+          if(s.net_profit>0) insight.innerText='✅ Good job! You earned more than you spent today.';
+          else if(s.net_profit<0) insight.innerText='⚠️ You spent more than you earned. Keep an eye on expenses.';
+          else insight.innerText='➡️ You broke even today.';
+          document.getElementById('summary-label').innerText = '🗄️ All Time Total';
+          document.getElementById('financial-summary').style.display='block';
+        }
+      }catch(e){console.error(e)}
+    }
+
+    window.onload = function(){
+      fetchOverallSummary();
+    }
+
+    function confidenceColor(score){
+      if (!score) return '#EF4444';
+      if (score > 0.85) return '#22C55E';
+      if (score >= 0.70) return '#F59E0B';
+      return '#EF4444';
+    }
+
+    async function updateCategory(index, newCategory, keyword) {
+      try {
+        const tx = currentTransactions[index];
+        const payload = { transaction_id: tx.id, new_category: newCategory, keyword };
+        const res = await fetch('http://127.0.0.1:5000/correct-category', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+        const data = await res.json();
+        if (data && data.success) {
+          // Update local UI
+          tx.category = newCategory;
+          // re-render
+          renderCategoryCards(currentTransactions);
+          alert('✅ Category updated!');
+        }
+      } catch (e) { console.error(e); alert('❌ Update failed'); }
+    }
+
+    async function saveAllTransactions(){
+      const btn = document.getElementById('save-all-btn');
+      const old = btn.innerText;
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving...';
+      try{
+        const res = await fetch('http://127.0.0.1:5000/save-transactions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({transactions: currentTransactions}) });
+        const data = await res.json();
+        if (data && data.success) {
+          btn.innerText = `✅ Saved ${data.count} transactions successfully!`;
+            loadCategorySummary();
+            // after saving, update overall summary from database
+            fetchOverallSummary();
+        } else {
+          btn.innerText = '❌ Save failed. Try again.';
+        }
+      }catch(e){
+        console.error(e); btn.innerText = '❌ Save failed. Try again.';
+      } finally { setTimeout(()=>{ btn.disabled=false; btn.innerText = old }, 2500); }
+    }
+
+    async function loadCategorySummary(){
+      try{
+        const res = await fetch('http://127.0.0.1:5000/categories/summary');
+        const data = await res.json();
+        if (data && data.summary) {
+          const summary = data.summary;
+          const entries = Object.entries(summary).sort((a,b)=>b[1]-a[1]).slice(0,6);
+          const max = entries.length ? entries[0][1] : 1;
+          const container = document.getElementById('summary-chart');
+          container.innerHTML = '';
+          entries.forEach(([cat, amt])=>{
+            const row = document.createElement('div'); row.className='summary-row';
+            const label = document.createElement('div'); label.className='summary-label'; label.innerText=cat;
+            const barWrap = document.createElement('div'); barWrap.className='summary-bar';
+            const fill = document.createElement('div'); fill.className='fill'; fill.style.width = (max? (amt/max*100):0) + '%'; fill.style.background = CATEGORY_COLORS[cat] || '#60a5fa';
+            barWrap.appendChild(fill);
+            const amtDiv = document.createElement('div'); amtDiv.innerText = '₹' + amt;
+            row.appendChild(label); row.appendChild(barWrap); row.appendChild(amtDiv);
+            container.appendChild(row);
+          });
+          document.getElementById('summary-chart').style.display='block';
+          document.getElementById('summary-title').style.display='block';
+        }
+      }catch(e){console.error(e)}
+    }
+
+    document.getElementById('save-all-btn').addEventListener('click', saveAllTransactions);
+
+    // Helper
+    function escapeHtml(s){ return (s||'').replace(/'/g, "\\'").replace(/\n/g,' '); }
+
+    // --- Integration: after parse, automatically call runCategorization(parsedTransactions)
+    // If an existing global function `onParseResults` exists, wrap it. Otherwise provide a helper to call.
+    if (window.onParseResults) {
+      const orig = window.onParseResults;
+      window.onParseResults = function(parsedTransactions){
+        try{ runCategorization(parsedTransactions); }catch(e){}
+        return orig(parsedTransactions);
+      }
+    } else {
+      // expose a simple helper used by Module 1 to hand parsed results
+      window.onParseResults = function(parsedTransactions){ runCategorization(parsedTransactions); }
+    }
+  </script>
+</body>
+</html>
