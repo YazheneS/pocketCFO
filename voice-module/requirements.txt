@@ -1,5 +1,7 @@
-# Voice module dependencies (to be implemented)
-# speech-recognition>=3.10.0
-# google-cloud-speech>=2.20.0  # or azure-cognitiveservices-speech
-# gtts>=2.3.0  # Google Text-to-Speech
-# python-dotenv>=1.0.0
+﻿flask
+flask-cors
+python-dotenv
+supabase
+groq
+pytest
+pytz

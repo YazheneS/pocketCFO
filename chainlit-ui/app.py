@@ -3,31 +3,45 @@ import requests
 import json
 import re
 import os
-import threading
 import sys
 from pathlib import Path
 from datetime import datetime
 from supabase import create_client
 
-# start FastAPI backend in background thread
-# this uses uvicorn which must be installed via requirements.txt
+# start FastAPI backend in background process
 # The backend lives under backend/app and provides transaction APIs
 try:
-    import uvicorn
+    import subprocess
 
     ROOT_DIR = Path(__file__).resolve().parent.parent
-    if str(ROOT_DIR) not in sys.path:
-        sys.path.insert(0, str(ROOT_DIR))
-
-    def start_backend():
-        """Launch FastAPI service from the bundled backend package."""
-        # use localhost to avoid exposing to network
-        uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, log_level="info")
-
-    backend_thread = threading.Thread(target=start_backend, daemon=True)
-    backend_thread.start()
-except ImportError:
-    print("⚠️ uvicorn not installed; backend will not start")
+    backend_dir = ROOT_DIR / "backend"
+    
+    # Check if backend should be started (not already running)
+    backend_cmd = [
+        sys.executable,  # python
+        "-m", "uvicorn",
+        "app.main:app",
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--log-level", "warning"
+    ]
+    
+    try:
+        # Test if backend is already running
+        requests.get("http://127.0.0.1:8000/health", timeout=1)
+        print("✓ Backend already running")
+    except:
+        # Start backend as subprocess
+        backend_process = subprocess.Popen(
+            backend_cmd,
+            cwd=str(backend_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print(f"✓ Backend started (PID: {backend_process.pid})")
+        
+except Exception as e:
+    print(f"⚠️ Backend startup failed: {e}")
 
 # -------------------------
 # ENVIRONMENT VARIABLES

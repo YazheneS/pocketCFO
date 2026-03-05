@@ -41,10 +41,15 @@ pocketCFO/
 │  ├─ Dockerfile
 │  └─ .env.example
 │
-├─ voice-module/               # Voice Interaction Module (Future)
+├─ voice-module/               # Voice + AI Categorization Module
+│  ├─ server.py              # Flask API for parse/categorize/save
+│  ├─ parser.py              # Groq-powered transaction parsing
+│  ├─ categorizer.py         # Rule + AI categorization logic
+│  ├─ index.html             # Voice/text UI
+│  ├─ tests/                 # Unit tests
 │  ├─ requirements.txt
-│  ├─ README.md
-│  └─ placeholder/
+│  ├─ Dockerfile
+│  └─ README.md
 │
 ├─ docs/                       # Documentation
 │  └─ ARCHITECTURE.md
@@ -91,7 +96,8 @@ pocketCFO/
 
 **Runs on:** `http://localhost:8001`
 
-**Example:** 
+**Example:**
+
 ```
 User: "Spent $500 on office rent"
 AI: ✅ Logged: expense | $500 | Rent | 2024-02-27
@@ -100,12 +106,26 @@ AI: ✅ Logged: expense | $500 | Rent | 2024-02-27
 
 ### **Module 3: Voice Module** (`voice-module/`)
 
-**Voice interaction module (In Development)**
+**Voice + AI parsing and categorization module**
 
-- 🎙️ Voice recognition (planned)
-- 🗣️ Speech-to-text conversion
-- 🔊 Voice command processing
-- 📱 Mobile voice interface
+- 🎙️ Voice/text transaction capture
+- 🧠 Groq Llama-powered parser for natural language inputs
+- 🏷️ Rule + AI category engine with correction learning
+- 💾 Save and query categorized transactions in Supabase
+- 📈 Summary endpoints for categories and overall totals
+
+**Runs on:** `http://localhost:5000`
+
+### **Integrated Frontend** (`voice-module/index.html`)
+
+The primary web frontend is served by the voice module and integrates with backend APIs:
+
+- Dashboard: parse text/voice inputs and save transactions
+- Categories: spending-by-category chart and category totals
+- Transactions: list, filter, pagination, delete, CSV/PDF export
+- AI Chat button: opens Chainlit UI (`http://localhost:8001`)
+
+Frontend host: `http://localhost:5000`
 
 ---
 
@@ -114,9 +134,11 @@ AI: ✅ Logged: expense | $500 | Rent | 2024-02-27
 ### Option 1: Run Locally (Manual Setup)
 
 #### Prerequisites
+
 - Python 3.9+
 - Ollama (for Chainlit LLM)
 - Supabase project with credentials
+- Groq API key (for voice module parser)
 
 #### Setup
 
@@ -156,6 +178,17 @@ source venv/Scripts/activate
 pip install -r requirements.txt
 chainlit run app.py
 # → UI running at http://localhost:8001
+```
+
+```bash
+# 6. Terminal 4: Start Voice Module
+cd voice-module
+python -m venv venv
+source venv/Scripts/activate
+
+pip install -r requirements.txt
+python server.py
+# → Voice module API running at http://localhost:5000
 ```
 
 ### Option 2: Docker Compose (Recommended)
@@ -201,13 +234,14 @@ curl -X POST http://localhost:8000/transactions \
 
 ## 🐳 Docker Deployment
 
-The `docker-compose.yml` orchestrates 3 services:
+The `docker-compose.yml` orchestrates 4 services:
 
-| Service | Port | Role |
-|---------|------|------|
-| **backend** | 8000 | FastAPI API server |
-| **chainlit** | 8001 | Conversational UI |
-| **ollama** | 11434 | LLM inference engine |
+| Service          | Port  | Role                  |
+| ---------------- | ----- | --------------------- |
+| **backend**      | 8000  | FastAPI API server    |
+| **chainlit**     | 8001  | Conversational UI     |
+| **voice-module** | 5000  | Voice + AI parser API |
+| **ollama**       | 11434 | LLM inference engine  |
 
 ### Build Custom Images
 
@@ -218,6 +252,7 @@ docker-compose build
 # Build specific service
 docker-compose build backend
 docker-compose build chainlit
+docker-compose build voice-module
 ```
 
 ### Start Services
@@ -248,6 +283,7 @@ SECRET_KEY=your-secret-key
 DEBUG=false
 OLLAMA_URL=http://ollama:11434/api/generate
 OLLAMA_MODEL=llama3.2
+GROQ_API_KEY=your-groq-api-key
 ```
 
 ---
@@ -255,6 +291,7 @@ OLLAMA_MODEL=llama3.2
 ## 📡 API Documentation
 
 ### Base URL
+
 ```
 http://localhost:8000/transactions
 ```
@@ -262,11 +299,13 @@ http://localhost:8000/transactions
 ### Endpoints
 
 #### List Transactions
+
 ```http
 GET /transactions?page=1&page_size=10&sort_by=transaction_date&order=desc
 ```
 
 **Query Parameters:**
+
 - `search` - Search keyword (description, category)
 - `category` - Filter by category
 - `type` - Filter by type: `income` or `expense`
@@ -278,16 +317,19 @@ GET /transactions?page=1&page_size=10&sort_by=transaction_date&order=desc
 - `page_size` - Results per page (default: 10, max: 100)
 
 **Example:**
+
 ```bash
 curl "http://localhost:8000/transactions?type=expense&sort_by=amount&order=desc&page=1&page_size=5"
 ```
 
 #### Get Single Transaction
+
 ```http
 GET /transactions/{id}
 ```
 
 #### Create Transaction
+
 ```http
 POST /transactions
 Content-Type: application/json
@@ -303,6 +345,7 @@ Content-Type: application/json
 ```
 
 #### Update Transaction
+
 ```http
 PUT /transactions/{id}
 Content-Type: application/json
@@ -314,25 +357,31 @@ Content-Type: application/json
 ```
 
 #### Delete Transaction
+
 ```http
 DELETE /transactions/{id}
 ```
 
 #### Export CSV
+
 ```http
 GET /transactions/export/csv?category=Supplies&start_date=2024-01-01
 ```
+
 Returns: CSV file download
 
 #### Export PDF
+
 ```http
 GET /transactions/export/pdf?type=expense&start_date=2024-01-01
 ```
+
 Returns: PDF report with summary
 
 ### Response Format
 
 **Success:**
+
 ```json
 {
   "success": true,
@@ -342,6 +391,7 @@ Returns: PDF report with summary
 ```
 
 **Error:**
+
 ```json
 {
   "success": false,
@@ -414,6 +464,7 @@ pip freeze > requirements.txt
 ## 📊 Database Schema
 
 ### Transactions Table
+
 ```sql
 CREATE TABLE transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -439,6 +490,7 @@ CREATE INDEX transactions_category_idx ON transactions(category);
 ## 🛣️ Roadmap
 
 ### ✅ Phase 1: Core (Complete)
+
 - [x] FastAPI backend with CRUD
 - [x] Supabase PostgreSQL integration
 - [x] Advanced filtering, sorting, pagination
@@ -447,13 +499,16 @@ CREATE INDEX transactions_category_idx ON transactions(category);
 - [x] Ollama LLM integration
 - [x] Real-time financial insights
 
-### 🚧 Phase 2: Voice Module (In Progress)
-- [ ] Voice recognition
-- [ ] Speech-to-text integration
-- [ ] Voice command processing
-- [ ] Mobile voice interface
+### ✅ Phase 2: Voice Module (Integrated)
+
+- [x] Voice/text module extracted from `module2-voice` branch
+- [x] Groq-powered parsing API (`/parse`)
+- [x] Categorization API (`/categorize`, `/correct-category`)
+- [x] Summary and transaction endpoints
+- [x] Docker integration and module-level docs
 
 ### 📋 Phase 3: Enhancements (Planned)
+
 - [ ] Dashboard with charts/analytics
 - [ ] Multi-user teams support
 - [ ] Receipt scanning (OCR)
@@ -482,6 +537,7 @@ CREATE INDEX transactions_category_idx ON transactions(category);
 ## 📝 Configuration Files
 
 ### .env.example
+
 ```env
 # Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
@@ -500,6 +556,7 @@ OLLAMA_MODEL=llama3.2
 ```
 
 ### Docker Configuration
+
 - `Dockerfile` - Backend containerization
 - `chainlit-ui/Dockerfile` - Chainlit containerization
 - `docker-compose.yml` - Multi-service orchestration
@@ -519,6 +576,7 @@ OLLAMA_MODEL=llama3.2
 ## 🆘 Troubleshooting
 
 ### Backend won't start
+
 ```bash
 # Check Supabase credentials
 echo $SUPABASE_URL
@@ -529,6 +587,7 @@ curl http://localhost:8000/health
 ```
 
 ### Chainlit not connecting to API
+
 ```bash
 # Verify backend is running
 curl http://localhost:8000/health
@@ -541,6 +600,7 @@ docker-compose restart
 ```
 
 ### Ollama not responding
+
 ```bash
 # Check if Ollama is running
 curl http://localhost:11434

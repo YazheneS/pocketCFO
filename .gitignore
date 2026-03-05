@@ -44,6 +44,13 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+.venv/
+backend/.venv/
+chainlit-ui/.venv/
+voice-module/.venv/
+
+# Runtime UI state
+/.chainlit/
 
 # OS
 .DS_Store
