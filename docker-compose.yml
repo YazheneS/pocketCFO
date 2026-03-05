@@ -1,32 +1,69 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  api:
-    build: .
+  # FastAPI Backend
+  backend:
+    container_name: pocketcfo-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - SECRET_KEY=${SECRET_KEY}
-      - DEBUG=True
+      - DEBUG=${DEBUG:-false}
     volumes:
-      - .:/app
-    depends_on:
-      - postgres
+      - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - pocketcfo-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
-  postgres:
-    image: postgres:15
+  # Chainlit Conversational UI
+  chainlit:
+    container_name: pocketcfo-chainlit
+    build:
+      context: ./chainlit-ui
+      dockerfile: Dockerfile
     ports:
-      - "5432:5432"
+      - "8001:8000"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=transactions_db
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434/api/generate}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./chainlit-ui:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - pocketcfo-network
+    command: chainlit run app.py --port 8000
+
+  # Ollama LLM Service (optional)
+  ollama:
+    container_name: pocketcfo-ollama
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    networks:
+      - pocketcfo-network
+
+networks:
+  pocketcfo-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
+  ollama_data:
