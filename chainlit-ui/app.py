@@ -3,8 +3,31 @@ import requests
 import json
 import re
 import os
+import threading
+import sys
+from pathlib import Path
 from datetime import datetime
 from supabase import create_client
+
+# start FastAPI backend in background thread
+# this uses uvicorn which must be installed via requirements.txt
+# The backend lives under backend/app and provides transaction APIs
+try:
+    import uvicorn
+
+    ROOT_DIR = Path(__file__).resolve().parent.parent
+    if str(ROOT_DIR) not in sys.path:
+        sys.path.insert(0, str(ROOT_DIR))
+
+    def start_backend():
+        """Launch FastAPI service from the bundled backend package."""
+        # use localhost to avoid exposing to network
+        uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, log_level="info")
+
+    backend_thread = threading.Thread(target=start_backend, daemon=True)
+    backend_thread.start()
+except ImportError:
+    print("⚠️ uvicorn not installed; backend will not start")
 
 # -------------------------
 # ENVIRONMENT VARIABLES
@@ -19,19 +42,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     print("⚠️ WARNING: SUPABASE_URL or SUPABASE_KEY not set. Database features will fail.")
 print(f"ℹ️ Ollama URL: {OLLAMA_URL}")
 print(f"ℹ️ Ollama Model: {OLLAMA_MODEL}")
-
-# -------------------------
-# SUPABASE CLIENT
-# -------------------------
-supabase = None
-
-def get_supabase():
-    global supabase
-    if supabase is None:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return supabase
-
-TABLE_NAME = "transactions_ai"  # Make sure this table exists in Supabase
 
 # -------------------------
 # OLLAMA CONFIG
@@ -95,32 +105,49 @@ async def extract_transaction(user_input: str) -> dict:
 # SAVE TRANSACTION TO SUPABASE
 # -------------------------
 def save_transaction(data: dict):
+    """Send transaction data to the backend API instead of talking to Supabase directly."""
     try:
-        record = {
-            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
-            "amount": data.get("amount", 0.0),
-            "type": data.get("type", "expense"),
+        txn_type = data.get("type", "expense")
+        if txn_type == "revenue":
+            txn_type = "income"
+
+        payload = {
+            "description": data.get("description", ""),
+            "amount": str(data.get("amount", 0.0)),
+            "type": txn_type,
             "category": data.get("category", "Other"),
-            "description": data.get("description", "")
+            "transaction_date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "is_personal": False,
         }
-        print(f"DEBUG: Saving transaction to Supabase: {record}", flush=True)
-        get_supabase().table(TABLE_NAME).insert(record).execute()
-        print("DEBUG: Transaction saved successfully", flush=True)
+
+        # the backend will handle insertion and return the created record
+        resp = requests.post(
+            "http://127.0.0.1:8000/transactions",
+            json=payload,
+            timeout=10
+        )
+        resp.raise_for_status()
+        print(f"DEBUG: Saved transaction via backend, status {resp.status_code}", flush=True)
+        return resp.json()
     except Exception as e:
-        print(f"ERROR: Failed to save transaction to Supabase: {e}", flush=True)
+        print(f"ERROR: Failed to save transaction via backend: {e}", flush=True)
         raise
 
 # -------------------------
 # FETCH LAST N TRANSACTIONS
 # -------------------------
 def get_last_transactions(limit=5):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return []
+    """Fetch recent transactions from the backend API."""
     try:
-        resp = get_supabase().table(TABLE_NAME).select("*").order("date", desc=True).limit(limit).execute()
-        return resp.data or []
+        resp = requests.get(
+            f"http://127.0.0.1:8000/transactions?page=1&page_size={limit}&sort_by=transaction_date&order=desc",
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        return data
     except Exception as e:
-        print(f"ERROR: Failed to fetch transactions: {e}", flush=True)
+        print(f"ERROR: Failed to fetch transactions via backend: {e}", flush=True)
         return []
 
 # -------------------------
@@ -169,7 +196,7 @@ async def call_ollama_stream(prompt: str, msg_element: cl.Message):
 @cl.on_chat_start
 async def start():
     print("DEBUG: Chat started", flush=True)
-    status = ["🦙 Ollama (llama3.2) Ready"]
+    status = ["🦙 Ollama (llama3.2) Ready", "🚀 Backend API available"]
     
     if SUPABASE_URL and SUPABASE_KEY:
         status.append("✅ Supabase configured")
@@ -189,12 +216,9 @@ async def main(message: cl.Message):
         await cl.Message(content="Couldn't detect the amount. Try: 'Spent 500 on rent'").send()
         return
 
-    # 2️⃣ Save to Supabase
+    # 2️⃣ Save through backend API
     try:
-        if SUPABASE_URL and SUPABASE_KEY:
-            save_transaction(data)
-        else:
-            print("WARN: Supabase not configured - transaction not saved", flush=True)
+        save_transaction(data)
     except Exception as e:
         await cl.Message(content=f"❌ Error saving transaction: {e}").send()
         return
@@ -211,10 +235,25 @@ async def main(message: cl.Message):
     # Generate dynamic insight
     last_tx = get_last_transactions(5)
     if last_tx:
-        amounts = [tx["amount"] for tx in last_tx if tx["type"] == "expense"]
-        avg_expense = sum(amounts)/len(amounts) if amounts else 0
-        insight_prompt = f"Give a short financial tip based on these last 5 transactions: {last_tx}"
-        await call_ollama_stream(insight_prompt, res_msg)
+        # prepare a structured prompt instructing the model to return JSON
+        insight_prompt = (
+            "You are a helpful assistant. Given the following list of transactions "
+            "(each with amount, type, category), return a JSON object with keys:\n"
+            "- tip: a brief financial tip string\n"
+            "- average_expense: the average expense amount (number)\n"
+            "- expense_count: number of expense transactions\n"
+            f"Transactions: {last_tx}"
+        )
+        full_resp = await call_ollama_stream(insight_prompt, res_msg)
+        # try to parse the returned text as JSON and update message if successful
+        try:
+            parsed = json.loads(full_resp)
+            formatted = json.dumps(parsed, indent=2)
+            res_msg.content = header + formatted
+            await res_msg.update()
+        except Exception:
+            # if parsing fails, leave whatever streamed
+            pass
     else:
         res_msg.content += "No previous transactions yet."
         await res_msg.update()
