@@ -1,4 +1,113 @@
-# AI Pocket CFO - Transaction Management Module
+# AI Pocket CFO - Integrated Workspace
+
+This workspace currently contains three modules that together form the Pocket CFO system:
+
+1. **`pocketCFO/`** – FastAPI backend for transaction management (Supabase-backed)
+2. **`pocket-cfo-chainlit/`** – Chainlit chat interface that extracts transactions using Ollama and stores them in Supabase
+3. **`pocketCFO-module2-voice/`** – Voice module placeholder directory (currently scaffold only; no source files yet)
+
+---
+
+## Integrated Architecture
+
+- **Backend API (`pocketCFO`)** exposes transaction CRUD, filtering, sorting, and CSV/PDF exports.
+- **Chat UI (`pocket-cfo-chainlit`)** accepts natural language entries, parses structured transaction data, and writes to Supabase table `transactions_ai`.
+- **Shared Data Layer (Supabase)** can support both modules; align table names/schema as you finalize integration.
+
+### Current integration status
+
+- ✅ FastAPI transaction module is production-structured and documented
+- ✅ Chainlit module is functional with Ollama + Supabase integration
+- ⚠️ Voice module folder exists but is currently empty (`.files/` only)
+
+---
+
+## Monorepo Layout
+
+```text
+KTYM/
+├─ pocketCFO/                    # FastAPI API module
+│  ├─ app/
+│  ├─ requirements.txt
+│  ├─ schema.sql
+│  └─ README.md
+├─ pocket-cfo-chainlit/          # Chainlit + Ollama module
+│  ├─ app.py
+│  └─ chainlit.md
+└─ pocketCFO-module2-voice/      # Voice module (placeholder)
+  └─ .files/
+```
+
+---
+
+## Quick Start (Integrated Local Run)
+
+### 1) Start FastAPI backend (`pocketCFO`)
+
+```bash
+cd pocketCFO
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+python -m uvicorn app.main:app --reload
+```
+
+Backend URLs:
+- API: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
+
+### 2) Start Chainlit module (`pocket-cfo-chainlit`)
+
+In a second terminal:
+
+```bash
+cd pocket-cfo-chainlit
+pip install chainlit supabase requests
+set SUPABASE_URL=https://your-project.supabase.co
+set SUPABASE_KEY=your-supabase-key
+set OLLAMA_URL=http://localhost:11434/api/generate
+set OLLAMA_MODEL=llama3.2
+chainlit run app.py -w
+```
+
+Chainlit URL:
+- UI: `http://localhost:8001` (default Chainlit port)
+
+### 3) (Optional) Voice module
+
+`pocketCFO-module2-voice` is reserved for Module 2 voice workflows, but no runnable files are present yet.
+
+---
+
+## Environment Variables
+
+### `pocketCFO/.env`
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
+SECRET_KEY=your-jwt-secret
+```
+
+### `pocket-cfo-chainlit` environment
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
+OLLAMA_URL=http://localhost:11434/api/generate
+OLLAMA_MODEL=llama3.2
+```
+
+---
+
+## Notes on Data Model Alignment
+
+- FastAPI module reads/writes transactions through its transaction service and expected schema from `schema.sql` / `schema_fixed.sql`.
+- Chainlit module currently writes into table **`transactions_ai`** with fields: `date`, `amount`, `type`, `category`, `description`.
+- If you want one unified reporting pipeline, map Chainlit writes to the same canonical table used by `pocketCFO` or create a synchronization job.
+
+---
 
 A complete, production-ready transaction management module for small business financial tracking built with **FastAPI**, **Supabase**, and **Python**.
 
