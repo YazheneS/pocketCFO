@@ -76,6 +76,10 @@ curl "http://localhost:8000/transactions?start_date=2024-01-01&end_date=2024-02-
 
 curl "http://localhost:8000/transactions?search=office&category=Supplies&sort_by=amount&order=asc"
 
+# 9b. Sort by personal flag (personal first)
+
+curl "http://localhost:8000/transactions?sort_by=is_personal&order=desc"
+
 # 10. Get single transaction
 
 curl http://localhost:8000/transactions/550e8400-e29b-41d4-a716-446655440000

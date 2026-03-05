@@ -84,7 +84,7 @@ async def get_transactions(
     type: Optional[str] = Query(None, description="Filter by type (income/expense)"),
     start_date: Optional[date] = Query(None, description="Start date (inclusive)"),
     end_date: Optional[date] = Query(None, description="End date (inclusive)"),
-    sort_by: str = Query("transaction_date", description="Sort by: date, amount, or category"),
+    sort_by: str = Query("transaction_date", description="Sort by: transaction_date, amount, category, or is_personal"),
     order: str = Query("desc", description="Sort order: asc or desc"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(10, ge=1, le=100, description="Results per page")
@@ -98,7 +98,7 @@ async def get_transactions(
     - Type (income/expense)
     - Date range
     
-    Supports sorting by date, amount, or category.
+    Supports sorting by transaction_date, amount, category, or is_personal.
     
     Args:
         service: Transaction service

@@ -70,7 +70,7 @@ class TransactionService:
             ValueError: If invalid sort_by or order parameters
         """
         # Validate parameters
-        valid_sort_fields = ["transaction_date", "amount", "category"]
+        valid_sort_fields = ["transaction_date", "amount", "category", "is_personal"]
         valid_orders = ["asc", "desc"]
         
         if sort_by not in valid_sort_fields:

@@ -131,8 +131,14 @@ GET /transactions?page=1&page_size=10&sort_by=transaction_date&order=desc
 - `type` (string) - Filter by type: `income` or `expense`
 - `start_date` (date) - Start date filter (YYYY-MM-DD)
 - `end_date` (date) - End date filter (YYYY-MM-DD)
-- `sort_by` (string) - Sort field: `transaction_date`, `amount`, or `category`
+- `sort_by` (string) - Sort field: `transaction_date`, `amount`, `category`, or `is_personal`
 - `order` (string) - Sort order: `asc` or `desc`
+
+Example (personal transactions first):
+
+```http
+GET /transactions?sort_by=is_personal&order=desc
+```
 
 **Response:**
 

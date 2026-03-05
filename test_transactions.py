@@ -144,6 +144,10 @@ class TestTransactionRetrieval:
         # Sort by amount
         response = client.get("/transactions?sort_by=amount&order=desc")
         assert response.status_code == 200
+
+        # Sort by personal flag
+        response = client.get("/transactions?sort_by=is_personal&order=desc")
+        assert response.status_code == 200
     
     def test_get_transactions_with_search(self):
         """Test search functionality"""
