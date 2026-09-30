@@ -1,0 +1,98 @@
+name: BrowserStack Selenium
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browserstack-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browserstack:
+    name: ${{ matrix.browser }} on ${{ matrix.os-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HAS_BROWSERSTACK_SECRETS: ${{ secrets.BROWSERSTACK_USERNAME != '' && secrets.BROWSERSTACK_ACCESS_KEY != '' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - browser: Chrome
+            os: Windows
+            os-version: "11"
+          - browser: Firefox
+            os: Windows
+            os-version: "11"
+          - browser: Safari
+            os: OS X
+            os-version: Sonoma
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        run: npm ci
+
+      - name: Build application
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        run: npm run build
+
+      - name: Start application
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        run: npm start &
+
+      - name: Wait for application
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        run: npx wait-on --timeout 60000 http://127.0.0.1:3000/todo
+
+      - name: Configure BrowserStack environment
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        uses: browserstack/github-actions/setup-env@1ab56d9521ce20f4651bb5d9f3ef39c5ba54805a
+        with:
+          username: ${{ secrets.BROWSERSTACK_USERNAME }}
+          access-key: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          build-name: CopilotMate-${{ github.run_number }}
+          project-name: CopilotMate
+
+      - name: Start BrowserStack Local
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        uses: browserstack/github-actions/setup-local@1ab56d9521ce20f4651bb5d9f3ef39c5ba54805a
+        with:
+          local-testing: start
+          local-identifier: random
+
+      - name: Run Selenium suite on BrowserStack
+        if: env.HAS_BROWSERSTACK_SECRETS == 'true'
+        run: npm run test:e2e:browserstack
+        env:
+          E2E_BASE_URL: http://localhost:3000
+          BROWSERSTACK_BROWSER: ${{ matrix.browser }}
+          BROWSERSTACK_BROWSER_VERSION: latest
+          BROWSERSTACK_OS: ${{ matrix.os }}
+          BROWSERSTACK_OS_VERSION: ${{ matrix.os-version }}
+
+      - name: Stop BrowserStack Local
+        if: always() && env.HAS_BROWSERSTACK_SECRETS == 'true'
+        uses: browserstack/github-actions/setup-local@1ab56d9521ce20f4651bb5d9f3ef39c5ba54805a
+        with:
+          local-testing: stop
+
+      - name: Explain skipped BrowserStack run
+        if: env.HAS_BROWSERSTACK_SECRETS != 'true'
+        run: echo "BrowserStack tests were skipped because repository secrets are unavailable."
