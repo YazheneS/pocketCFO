@@ -7,10 +7,16 @@ This is the entry point for the transaction management API.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
-from app.routes import transactions
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+from app.routes import chat, transactions
 from app.utils.supabase_client import SupabaseManager
 
 # Configure logging
@@ -27,13 +33,14 @@ async def lifespan(app: FastAPI):
     """
     # Startup event
     logger.info("Starting up Transaction Management API")
-    try:
-        # Initialize Supabase client
-        client = SupabaseManager.get_client()
-        logger.info("Supabase client initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
-        raise
+    # TEMPORARY: Skip Supabase initialization for isolated chatbot testing only.
+    # try:
+    #     # Initialize Supabase client
+    #     client = SupabaseManager.get_client()
+    #     logger.info("Supabase client initialized successfully")
+    # except Exception as e:
+    #     logger.error(f"Failed to initialize Supabase client: {e}")
+    #     raise
     
     yield
     
@@ -63,6 +70,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(transactions.router)
+app.include_router(chat.router)
 
 
 @app.get("/", tags=["root"])
@@ -130,12 +138,15 @@ async def global_exception_handler(request, exc):
     Returns:
         dict: Error response
     """
-    logger.error(f"Unhandled exception: {str(exc)}")
-    return {
-        "success": False,
-        "message": "An unexpected error occurred",
-        "error_code": "INTERNAL_SERVER_ERROR"
-    }
+    logger.exception("Unhandled exception")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "An unexpected error occurred",
+            "error_code": "INTERNAL_SERVER_ERROR"
+        }
+    )
 
 
 if __name__ == "__main__":
