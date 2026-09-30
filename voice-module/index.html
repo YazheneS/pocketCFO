@@ -754,15 +754,127 @@
           grid-template-columns: 100px 1fr 60px;
         }
       }
+
+      #auth-gate {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(10, 14, 39, 0.96);
+      }
+
+      #auth-gate.is-hidden {
+        display: none;
+      }
+
+      .auth-card {
+        width: min(100%, 420px);
+        padding: 28px;
+        background: #1a1f3a;
+        border: 1px solid #374151;
+        border-radius: 12px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+      }
+
+      .auth-card h1 {
+        margin-bottom: 8px;
+        color: #fff;
+      }
+
+      .auth-card p {
+        margin-bottom: 20px;
+        color: #9ca3af;
+      }
+
+      .auth-card label {
+        display: block;
+        margin: 12px 0 6px;
+        color: #d1d5db;
+        font-size: 14px;
+      }
+
+      .auth-card input {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1px solid #4b5563;
+        border-radius: 8px;
+        background: #0a0e27;
+        color: #fff;
+      }
+
+      .auth-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .auth-actions button {
+        flex: 1;
+        justify-content: center;
+      }
+
+      #auth-login {
+        background: #00d4aa;
+        color: #06110f;
+      }
+
+      #auth-signup {
+        background: #374151;
+        color: #fff;
+      }
+
+      #auth-logout {
+        width: 100%;
+        justify-content: center;
+        background: #374151;
+        color: #fff;
+      }
+
+      #auth-message {
+        min-height: 20px;
+        margin-top: 14px;
+        color: #fbbf24;
+        font-size: 14px;
+      }
+
+      #auth-account {
+        margin-top: 12px;
+        color: #9ca3af;
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
     </style>
   </head>
   <body>
+    <div id="auth-gate" role="dialog" aria-labelledby="auth-title">
+      <div class="auth-card">
+        <h1 id="auth-title">PocketCFO</h1>
+        <p>Sign in to securely access your transactions and AI assistant.</p>
+        <form id="auth-form">
+          <label for="auth-email">Email</label>
+          <input id="auth-email" type="email" autocomplete="email" required />
+          <label for="auth-password">Password</label>
+          <input id="auth-password" type="password" autocomplete="current-password" minlength="6" required />
+          <div class="auth-actions">
+            <button id="auth-login" type="submit">Login</button>
+            <button id="auth-signup" type="button">Sign up</button>
+          </div>
+        </form>
+        <div id="auth-message" role="status" aria-live="polite">Loading secure sign-in...</div>
+      </div>
+    </div>
+
     <!-- Sidebar -->
     <div class="sidebar">
       <div class="logo">
         <div class="logo-icon">💧</div>
         <span>CFO</span>
       </div>
+      <div id="auth-account"></div>
+      <button id="auth-logout" type="button" hidden>Logout</button>
 
       <div class="nav-section">
         <span class="nav-label">Main</span>
@@ -1254,12 +1366,140 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script>
       // Configuration
       const BACKEND_URL = "http://127.0.0.1:8000";
       const VOICE_URL = "http://127.0.0.1:5000";
+      let supabaseClient = null;
+      let currentSession = null;
+      let authInitialized = false;
+
+      function backendHeaders() {
+        const headers = { "Content-Type": "application/json" };
+        if (currentSession?.access_token) {
+          headers.Authorization = `Bearer ${currentSession.access_token}`;
+        }
+        return headers;
+      }
+
+      function setAuthMessage(message, isError = false) {
+        const element = document.getElementById("auth-message");
+        element.textContent = message;
+        element.style.color = isError ? "#fca5a5" : "#fbbf24";
+      }
+
+      function updateAuthUI(session) {
+        currentSession = session;
+        const gate = document.getElementById("auth-gate");
+        const account = document.getElementById("auth-account");
+        const logout = document.getElementById("auth-logout");
+        const loggedIn = Boolean(session?.access_token);
+
+        gate.classList.toggle("is-hidden", loggedIn);
+        logout.hidden = !loggedIn;
+        account.textContent = loggedIn ? `Signed in as ${session.user.email}` : "";
+        if (loggedIn) {
+          setAuthMessage("Signed in securely.");
+        }
+      }
+
+      async function signOutUser(message = "") {
+        currentSession = null;
+        currentTransactions = [];
+        if (supabaseClient) await supabaseClient.auth.signOut();
+        updateAuthUI(null);
+        if (message) setAuthMessage(message, true);
+      }
+
+      async function initializeAuth() {
+        try {
+          const configResponse = await fetch(`${VOICE_URL}/auth/config`);
+          const config = await configResponse.json();
+          if (!configResponse.ok || !config.success) {
+            throw new Error(config.message || "Supabase authentication is not configured.");
+          }
+
+          supabaseClient = window.supabase.createClient(
+            config.supabase_url,
+            config.supabase_anon_key,
+            { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } },
+          );
+
+          supabaseClient.auth.onAuthStateChange((event, session) => {
+            updateAuthUI(session);
+            if (event === "SIGNED_OUT") {
+              currentTransactions = [];
+            }
+          });
+
+          const { data, error } = await supabaseClient.auth.getSession();
+          if (error) throw error;
+          updateAuthUI(data.session);
+          authInitialized = true;
+          if (data.session) {
+            await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
+          }
+        } catch (error) {
+          setAuthMessage(error.message || "Unable to initialize Supabase authentication.", true);
+        }
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        if (!supabaseClient) return setAuthMessage("Authentication is still loading.", true);
+        const email = document.getElementById("auth-email").value.trim();
+        const password = document.getElementById("auth-password").value;
+        setAuthMessage("Signing in...");
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) setAuthMessage(error.message, true);
+        if (!error && data.session) {
+          await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
+        }
+      }
+
+      async function signup() {
+        if (!supabaseClient) return setAuthMessage("Authentication is still loading.", true);
+        const email = document.getElementById("auth-email").value.trim();
+        const password = document.getElementById("auth-password").value;
+        setAuthMessage("Creating your account...");
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) return setAuthMessage(error.message, true);
+        if (!data.session) {
+          setAuthMessage("Account created. Check your email to confirm your account, then log in.");
+        }
+      }
+
+      function apiErrorMessage(response, data, fallback) {
+        const detail = data?.detail;
+        if (typeof detail === "string" && detail.trim()) return detail;
+        if (detail?.message) return detail.message;
+        if (data?.message) return data.message;
+        if (response.status === 401) return "Session expired. Please login again.";
+        if (response.status === 403) return "You are not allowed to access this data.";
+        if (response.status === 404) return "The requested transaction was not found.";
+        if (response.status === 422) return "Please check the transaction fields and try again.";
+        if (response.status >= 500) return "The PocketCFO server could not complete the request.";
+        return fallback;
+      }
+
+      async function readApiResponse(response, fallback) {
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (error) {
+          data = {};
+        }
+        if (!response.ok) {
+          if (response.status === 401) {
+            await signOutUser("Session expired. Please login again.");
+          }
+          throw new Error(apiErrorMessage(response, data, fallback));
+        }
+        return data;
+      }
 
       const CATEGORY_COLORS = {
         Revenue: "#00d4aa",
@@ -1341,13 +1581,10 @@
         try {
           const response = await fetch(`${BACKEND_URL}/chat`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: backendHeaders(),
             body: JSON.stringify({ message }),
           });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(data.detail?.message || "Chat request failed");
-          }
+          const data = await readApiResponse(response, "Chat request failed.");
           addChatMessage(data.response, "ai");
         } catch (error) {
           addChatMessage(error.message || "Unable to reach the AI assistant.", "ai");
@@ -1652,10 +1889,21 @@
 
       async function fetchOverallSummary() {
         try {
-          const res = await fetch(`${VOICE_URL}/summary`);
-          const d = await res.json();
-          if (d && d.success && d.summary) {
-            const s = d.summary;
+          const res = await fetch(`${BACKEND_URL}/transactions?page=1&page_size=100`, {
+            headers: backendHeaders(),
+          });
+          const d = await readApiResponse(res, "Unable to load transaction summary.");
+          if (d && d.success) {
+            const s = d.data.reduce(
+              (summary, transaction) => {
+                const amount = Number(transaction.amount) || 0;
+                if (transaction.type === "income") summary.total_revenue += amount;
+                else summary.total_expenses += amount;
+                return summary;
+              },
+              { total_revenue: 0, total_expenses: 0 },
+            );
+            s.net_profit = s.total_revenue - s.total_expenses;
             document
               .getElementById("box-revenue")
               .querySelector(".value").innerText = `₹${s.total_revenue}`;
@@ -1683,7 +1931,7 @@
             insightDiv.classList.add("show");
           }
         } catch (e) {
-          console.error(e);
+          console.error("Error loading transaction summary:", e);
         }
       }
 
@@ -1694,43 +1942,18 @@
         return "#ef4444";
       }
 
-      async function saveAllTransactions() {
-        const btn = document.getElementById("save-all-btn");
-        const old = btn.innerText;
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Saving...';
-
-        try {
-          const res = await fetch("http://127.0.0.1:5000/save-transactions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transactions: currentTransactions }),
-          });
-          const data = await res.json();
-          if (data && data.success) {
-            btn.innerText = `✓ Saved ${data.count} transactions successfully!`;
-            loadCategorySummary();
-            fetchOverallSummary();
-          } else {
-            btn.innerText = "✗ Save failed. Try again.";
-          }
-        } catch (e) {
-          console.error(e);
-          btn.innerText = "✗ Save failed. Try again.";
-        } finally {
-          setTimeout(() => {
-            btn.disabled = false;
-            btn.innerText = old;
-          }, 2500);
-        }
-      }
-
       async function loadCategorySummary() {
         try {
-          const res = await fetch(`${VOICE_URL}/categories/summary`);
-          const data = await res.json();
-          if (data && data.summary) {
-            const summary = data.summary;
+          const res = await fetch(`${BACKEND_URL}/transactions?page=1&page_size=100`, {
+            headers: backendHeaders(),
+          });
+          const data = await readApiResponse(res, "Unable to load category summary.");
+          if (data && data.success) {
+            const summary = {};
+            data.data.forEach((transaction) => {
+              const category = transaction.category || "Other";
+              summary[category] = (summary[category] || 0) + (Number(transaction.amount) || 0);
+            });
             const entries = Object.entries(summary)
               .sort((a, b) => b[1] - a[1])
               .slice(0, 6);
@@ -1799,8 +2022,10 @@
           if (startDate) params.append("start_date", startDate);
           if (endDate) params.append("end_date", endDate);
 
-          const res = await fetch(`${BACKEND_URL}/transactions?${params}`);
-          const data = await res.json();
+          const res = await fetch(`${BACKEND_URL}/transactions?${params}`, {
+            headers: backendHeaders(),
+          });
+          const data = await readApiResponse(res, "Unable to load transactions.");
 
           if (data.success) {
             currentPage = data.page;
@@ -1814,7 +2039,7 @@
           document.getElementById("transactions-tbody").innerHTML = `
             <tr>
               <td colspan="6" style="padding: 40px; text-align: center; color: #ef4444;">
-                ❌ Error loading transactions. Make sure backend is running on port 8000.
+                ❌ ${e.message || "Unable to load transactions."}
               </td>
             </tr>
           `;
@@ -1899,19 +2124,20 @@
         try {
           const res = await fetch(`${BACKEND_URL}/transactions/${id}`, {
             method: "DELETE",
+            headers: backendHeaders(),
           });
-          const data = await res.json();
+          const data = await readApiResponse(res, "Unable to delete transaction.");
 
           if (data.success) {
             alert("✓ Transaction deleted successfully");
             loadTransactions(currentPage);
             fetchOverallSummary();
           } else {
-            alert("❌ Failed to delete transaction");
+            alert(`❌ ${data.message || "Failed to delete transaction."}`);
           }
         } catch (e) {
           console.error("Error deleting transaction:", e);
-          alert("❌ Error deleting transaction");
+          alert(`❌ ${e.message || "Error deleting transaction."}`);
         }
       }
 
@@ -1933,13 +2159,23 @@
           if (startDate) params.append("start_date", startDate);
           if (endDate) params.append("end_date", endDate);
 
-          window.open(
-            `${BACKEND_URL}/transactions/export/csv?${params}`,
-            "_blank",
-          );
+          const res = await fetch(`${BACKEND_URL}/transactions/export/csv?${params}`, {
+            headers: backendHeaders(),
+          });
+          const blob = await res.blob();
+          if (!res.ok) {
+            let data = {};
+            try { data = JSON.parse(await blob.text()); } catch (error) {}
+            throw new Error(apiErrorMessage(res, data, "CSV export failed."));
+          }
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "pocketcfo-transactions.csv";
+          link.click();
+          URL.revokeObjectURL(link.href);
         } catch (e) {
           console.error("Error exporting CSV:", e);
-          alert("❌ Error exporting CSV");
+          alert(`❌ ${e.message || "Error exporting CSV."}`);
         }
       }
 
@@ -1961,22 +2197,33 @@
           if (startDate) params.append("start_date", startDate);
           if (endDate) params.append("end_date", endDate);
 
-          window.open(
-            `${BACKEND_URL}/transactions/export/pdf?${params}`,
-            "_blank",
-          );
+          const res = await fetch(`${BACKEND_URL}/transactions/export/pdf?${params}`, {
+            headers: backendHeaders(),
+          });
+          const blob = await res.blob();
+          if (!res.ok) {
+            let data = {};
+            try { data = JSON.parse(await blob.text()); } catch (error) {}
+            throw new Error(apiErrorMessage(res, data, "PDF export failed."));
+          }
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "pocketcfo-transactions.pdf";
+          link.click();
+          URL.revokeObjectURL(link.href);
         } catch (e) {
           console.error("Error exporting PDF:", e);
-          alert("❌ Error exporting PDF");
+          alert(`❌ ${e.message || "Error exporting PDF."}`);
         }
       }
 
       async function loadCategoriesForFilter() {
         try {
           const res = await fetch(
-            `${BACKEND_URL}/transactions?page=1&page_size=1000`,
+            `${BACKEND_URL}/transactions?page=1&page_size=100`,
+            { headers: backendHeaders() },
           );
-          const data = await res.json();
+          const data = await readApiResponse(res, "Unable to load categories.");
 
           if (data.success) {
             const categories = [
@@ -2001,9 +2248,10 @@
       async function loadCategoriesPage() {
         try {
           const res = await fetch(
-            `${BACKEND_URL}/transactions?page=1&page_size=1000`,
+            `${BACKEND_URL}/transactions?page=1&page_size=100`,
+            { headers: backendHeaders() },
           );
-          const data = await res.json();
+          const data = await readApiResponse(res, "Unable to load category totals.");
 
           if (data.success) {
             const categoryTotals = {};
@@ -2051,30 +2299,40 @@
 
           for (const t of currentTransactions) {
             const payload = {
-              description: t.description,
+              description: t.description || t.merchant,
               amount: String(t.amount),
               type: t.type || "expense",
               category: t.category,
-              transaction_date: new Date().toISOString().split("T")[0],
+              transaction_date: t.transaction_date || t.date,
               is_personal: t.category === "Personal",
             };
 
+            if (!payload.transaction_date) {
+              throw new Error("Each transaction must include a transaction date.");
+            }
+            if (!payload.description) {
+              throw new Error("Each transaction must include a description or merchant.");
+            }
+
             const res = await fetch(`${BACKEND_URL}/transactions`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: backendHeaders(),
               body: JSON.stringify(payload),
             });
 
-            const data = await res.json();
-            if (data.success) savedCount++;
+            const data = await readApiResponse(res, "Unable to save transaction.");
+            if (!data.success) {
+              throw new Error(data.message || "Unable to save transaction.");
+            }
+            savedCount++;
           }
 
           btn.innerText = `✓ Saved ${savedCount} transactions successfully!`;
-          loadCategorySummary();
-          fetchOverallSummary();
+          await loadCategorySummary();
+          await fetchOverallSummary();
         } catch (e) {
           console.error(e);
-          btn.innerText = "✗ Save failed. Try again.";
+          btn.innerText = `✗ ${e.message || "Save failed. Try again."}`;
         } finally {
           setTimeout(() => {
             btn.disabled = false;
@@ -2083,10 +2341,11 @@
         }
       }
 
-      window.onload = function () {
-        fetchOverallSummary();
-        loadCategorySummary();
-      };
+      document.getElementById("auth-form").addEventListener("submit", login);
+      document.getElementById("auth-signup").addEventListener("click", signup);
+      document.getElementById("auth-logout").addEventListener("click", () => signOutUser("You have been logged out."));
+
+      window.onload = initializeAuth;
 
       window.onParseResults = function (parsedTransactions) {
         runCategorization(parsedTransactions);

@@ -1,4 +1,7 @@
 ﻿import os
+import base64
+import binascii
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -209,6 +212,37 @@ def overall_summary():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "message": "PocketCFO API is running"})
+
+
+@app.route("/auth/config", methods=["GET"])
+def auth_config():
+    """Return only the Supabase browser configuration, never a service key."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        return jsonify({"success": False, "message": "Supabase is not configured"}), 503
+
+    try:
+        encoded_payload = supabase_key.split(".")[1]
+        encoded_payload += "=" * (-len(encoded_payload) % 4)
+        role = json.loads(
+            base64.urlsafe_b64decode(encoded_payload).decode("utf-8")
+        ).get("role")
+    except (IndexError, ValueError, UnicodeDecodeError, binascii.Error):
+        role = None
+
+    if role != "anon":
+        return jsonify({
+            "success": False,
+            "message": "A public Supabase anon key is required for browser authentication",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "supabase_url": supabase_url,
+        "supabase_anon_key": supabase_key,
+    })
 
 
 @app.route("/", methods=["GET"])

@@ -21,10 +21,10 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 # Read schema file
 try:
-    with open("schema.sql", "r") as f:
+    with open("database/schema.sql", "r") as f:
         schema_sql = f.read()
 except FileNotFoundError:
-    print("❌ Error: schema.sql file not found in current directory")
+    print("❌ Error: database/schema.sql file not found in project root")
     sys.exit(1)
 
 print("🔐 Connecting to Supabase...")

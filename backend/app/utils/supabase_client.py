@@ -6,6 +6,7 @@ and provides utility functions for database operations.
 """
 
 import os
+from dataclasses import dataclass
 from typing import Optional
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -70,6 +71,34 @@ class SupabaseManager:
         Useful for testing or reinitializing the connection.
         """
         cls._instance = None
+
+
+@dataclass(frozen=True)
+class AuthenticatedContext:
+    client: Client
+    user_id: str
+
+
+def get_authenticated_context(access_token: str) -> AuthenticatedContext:
+    """Validate a Supabase access token and return an RLS-aware client."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        raise ValueError(
+            "SUPABASE_URL and SUPABASE_KEY environment variables must be set"
+        )
+
+    client = create_client(supabase_url, supabase_key)
+    user_response = client.auth.get_user(access_token)
+    user = getattr(user_response, "user", None)
+    user_id = getattr(user, "id", None)
+
+    if not user_id:
+        raise ValueError("Supabase access token did not identify a user")
+
+    client.postgrest.auth(access_token)
+    return AuthenticatedContext(client=client, user_id=user_id)
 
 
 def get_supabase_client() -> Client:

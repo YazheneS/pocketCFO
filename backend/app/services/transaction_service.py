@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from datetime import date
 from decimal import Decimal
 from supabase import Client
-from app.models.transaction_models import (
+from backend.app.models.transaction_models import (
     TransactionCreate,
     TransactionUpdate,
     TransactionResponse

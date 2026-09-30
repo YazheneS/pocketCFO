@@ -1,12 +1,10 @@
-version: "3.8"
-
 services:
   # FastAPI Backend
   backend:
     container_name: pocketcfo-backend
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -16,8 +14,8 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - DEBUG=${DEBUG:-false}
     volumes:
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - ./backend:/app/backend
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - pocketcfo-network
     healthcheck:
@@ -26,28 +24,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
-  # Chainlit Conversational UI
-  chainlit:
-    container_name: pocketcfo-chainlit
-    build:
-      context: ./chainlit-ui
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8000"
-    environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434/api/generate}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
-    volumes:
-      - ./chainlit-ui:/app
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - pocketcfo-network
-    command: chainlit run app.py --port 8000
 
   # Voice Module API
   voice-module:
@@ -74,22 +50,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # Ollama LLM Service (optional)
-  ollama:
-    container_name: pocketcfo-ollama
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-    networks:
-      - pocketcfo-network
-
 networks:
   pocketcfo-network:
     driver: bridge
 
-volumes:
-  ollama_data:

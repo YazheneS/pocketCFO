@@ -4,12 +4,12 @@ Transaction routes for FastAPI application.
 This module defines all HTTP endpoints for transaction management.
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Response
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response
 from datetime import date
 from typing import Optional
 from supabase import Client
 
-from app.models.transaction_models import (
+from backend.app.models.transaction_models import (
     TransactionCreate,
     TransactionUpdate,
     TransactionResponse,
@@ -19,9 +19,12 @@ from app.models.transaction_models import (
     ErrorResponse,
     ExportResponse
 )
-from app.services.transaction_service import TransactionService
-from app.utils.supabase_client import get_supabase_client
-from app.utils.export_utils import (
+from backend.app.services.transaction_service import TransactionService
+from backend.app.utils.supabase_client import (
+    AuthenticatedContext,
+    get_authenticated_context,
+)
+from backend.app.utils.export_utils import (
     generate_csv_content,
     generate_pdf_content,
     get_csv_filename,
@@ -34,45 +37,47 @@ router = APIRouter(
 )
 
 
+def get_authenticated_context_dependency(request: Request) -> AuthenticatedContext:
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "success": False,
+                "message": "A valid Supabase Bearer token is required",
+                "error_code": "AUTHENTICATION_REQUIRED",
+            },
+        )
+
+    try:
+        return get_authenticated_context(token)
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "success": False,
+                "message": "The Supabase session is invalid or expired",
+                "error_code": "INVALID_AUTHENTICATION",
+            },
+        )
+
+
 def get_transaction_service(
-    client: Client = Depends(get_supabase_client)
+    context: AuthenticatedContext = Depends(get_authenticated_context_dependency)
 ) -> TransactionService:
-    """
-    Dependency injection for TransactionService.
-    
-    Args:
-        client: Supabase client
-        
-    Returns:
-        TransactionService instance
-    """
-    return TransactionService(client)
+    """Create a transaction service using the authenticated request client."""
+    return TransactionService(context.client)
 
 
-def get_user_id() -> str:
+def get_user_id(
+    context: AuthenticatedContext = Depends(get_authenticated_context_dependency),
+) -> str:
     """
-    Extract user ID from JWT token.
-    
-    NOTE: In production, this should extract from actual JWT token
-    from the Authorization header. For now, using a placeholder.
-    
-    Returns:
-        str: User ID
-        
-    Raises:
-        HTTPException: If user ID cannot be determined
+    Return the authenticated Supabase user's ID.
     """
-    # TODO: Implement actual JWT extraction
-    # from fastapi import Request
-    # from jose import JWTError, jwt
-    # Example:
-    # auth_header = request.headers.get("Authorization")
-    # token = auth_header.split(" ")[1]
-    # payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    # user_id = payload.get("sub")
-    
-    # For now, placeholder:
-    return "550e8400-e29b-41d4-a716-446655440000"  # Replace with actual extraction
+    return context.user_id
 
 
 @router.get("", response_model=PaginatedTransactionResponse)
@@ -156,7 +161,7 @@ async def get_transactions(
         )
 
 
-@router.get("/{transaction_id}", response_model=SingleTransactionResponse)
+@router.get("/{transaction_id:uuid}", response_model=SingleTransactionResponse)
 async def get_transaction(
     transaction_id: str,
     service: TransactionService = Depends(get_transaction_service),
@@ -248,7 +253,7 @@ async def create_transaction(
         )
 
 
-@router.put("/{transaction_id}", response_model=SingleTransactionResponse)
+@router.put("/{transaction_id:uuid}", response_model=SingleTransactionResponse)
 async def update_transaction(
     transaction_id: str,
     update_data: TransactionUpdate,
@@ -304,7 +309,7 @@ async def update_transaction(
         )
 
 
-@router.delete("/{transaction_id}", response_model=DeleteTransactionResponse)
+@router.delete("/{transaction_id:uuid}", response_model=DeleteTransactionResponse)
 async def delete_transaction(
     transaction_id: str,
     service: TransactionService = Depends(get_transaction_service),

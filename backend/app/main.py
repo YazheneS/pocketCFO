@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from app.routes import chat, transactions
-from app.utils.supabase_client import SupabaseManager
+from backend.app.routes import chat, transactions
+from backend.app.utils.supabase_client import SupabaseManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

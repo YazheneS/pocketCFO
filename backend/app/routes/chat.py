@@ -4,12 +4,12 @@ import json
 from decimal import Decimal
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app.routes.transactions import get_user_id
-from app.services.transaction_service import TransactionService
-from app.utils.supabase_client import SupabaseManager
+from backend.app.services.transaction_service import TransactionService
+from backend.app.utils.supabase_client import AuthenticatedContext
+from backend.app.routes.transactions import get_authenticated_context_dependency
 
 
 logger = logging.getLogger(__name__)
@@ -90,10 +90,10 @@ def is_transaction_question(message: str) -> bool:
     )
 
 
-async def get_transaction_context() -> list[dict[str, str]]:
-    service = TransactionService(SupabaseManager.get_client())
+async def get_transaction_context(context: AuthenticatedContext) -> list[dict[str, str]]:
+    service = TransactionService(context.client)
     transactions, _ = await service.get_transactions(
-        user_id=get_user_id(),
+        user_id=context.user_id,
         page=1,
         page_size=100,
     )
@@ -127,7 +127,10 @@ class ChatResponse(BaseModel):
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    context: AuthenticatedContext = Depends(get_authenticated_context_dependency),
+) -> ChatResponse:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise HTTPException(
@@ -143,7 +146,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         profit_summary = None
         latest_transaction = None
         if is_transaction_question(request.message):
-            transaction_context = await get_transaction_context()
+            transaction_context = await get_transaction_context(context)
             if not transaction_context:
                 return ChatResponse(
                     success=True,
