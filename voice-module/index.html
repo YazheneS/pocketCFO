@@ -852,18 +852,18 @@
     <div id="auth-gate" role="dialog" aria-labelledby="auth-title">
       <div class="auth-card">
         <h1 id="auth-title">PocketCFO</h1>
-        <p>Sign in to securely access your transactions and AI assistant.</p>
+        <p>Log in to access your transactions and AI assistant. Any email and password will work.</p>
         <form id="auth-form">
           <label for="auth-email">Email</label>
-          <input id="auth-email" type="email" autocomplete="email" required />
+          <input id="auth-email" type="text" autocomplete="email" />
           <label for="auth-password">Password</label>
-          <input id="auth-password" type="password" autocomplete="current-password" minlength="6" required />
+          <input id="auth-password" type="password" autocomplete="current-password" />
           <div class="auth-actions">
             <button id="auth-login" type="submit">Login</button>
             <button id="auth-signup" type="button">Sign up</button>
           </div>
         </form>
-        <div id="auth-message" role="status" aria-live="polite">Loading secure sign-in...</div>
+        <div id="auth-message" role="status" aria-live="polite">Enter any email and password to continue.</div>
       </div>
     </div>
 
@@ -1366,23 +1366,18 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script>
       // Configuration
       const BACKEND_URL = "http://127.0.0.1:8000";
       const VOICE_URL = "http://127.0.0.1:5000";
-      let supabaseClient = null;
+      // Login is cosmetic: any email/password (even empty) is accepted.
       let currentSession = null;
-      let authInitialized = false;
+      const SESSION_KEY = "pocketcfo_session";
 
       function backendHeaders() {
-        const headers = { "Content-Type": "application/json" };
-        if (currentSession?.access_token) {
-          headers.Authorization = `Bearer ${currentSession.access_token}`;
-        }
-        return headers;
+        return { "Content-Type": "application/json" };
       }
 
       function setAuthMessage(message, isError = false) {
@@ -1396,80 +1391,47 @@
         const gate = document.getElementById("auth-gate");
         const account = document.getElementById("auth-account");
         const logout = document.getElementById("auth-logout");
-        const loggedIn = Boolean(session?.access_token);
+        const loggedIn = Boolean(session);
 
         gate.classList.toggle("is-hidden", loggedIn);
         logout.hidden = !loggedIn;
-        account.textContent = loggedIn ? `Signed in as ${session.user.email}` : "";
+        account.textContent = loggedIn ? `Signed in as ${session.email}` : "";
         if (loggedIn) {
-          setAuthMessage("Signed in securely.");
+          setAuthMessage("Signed in.");
         }
       }
 
       async function signOutUser(message = "") {
         currentSession = null;
         currentTransactions = [];
-        if (supabaseClient) await supabaseClient.auth.signOut();
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
         updateAuthUI(null);
         if (message) setAuthMessage(message, true);
       }
 
       async function initializeAuth() {
-        try {
-          const configResponse = await fetch(`${VOICE_URL}/auth/config`);
-          const config = await configResponse.json();
-          if (!configResponse.ok || !config.success) {
-            throw new Error(config.message || "Supabase authentication is not configured.");
-          }
-
-          supabaseClient = window.supabase.createClient(
-            config.supabase_url,
-            config.supabase_anon_key,
-            { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } },
-          );
-
-          supabaseClient.auth.onAuthStateChange((event, session) => {
-            updateAuthUI(session);
-            if (event === "SIGNED_OUT") {
-              currentTransactions = [];
-            }
-          });
-
-          const { data, error } = await supabaseClient.auth.getSession();
-          if (error) throw error;
-          updateAuthUI(data.session);
-          authInitialized = true;
-          if (data.session) {
-            await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
-          }
-        } catch (error) {
-          setAuthMessage(error.message || "Unable to initialize Supabase authentication.", true);
+        let saved = null;
+        try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch (e) {}
+        if (saved) {
+          updateAuthUI(saved);
+          await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
+        } else {
+          setAuthMessage("Enter any email and password to continue.");
         }
       }
 
       async function login(event) {
         event.preventDefault();
-        if (!supabaseClient) return setAuthMessage("Authentication is still loading.", true);
-        const email = document.getElementById("auth-email").value.trim();
-        const password = document.getElementById("auth-password").value;
-        setAuthMessage("Signing in...");
-        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) setAuthMessage(error.message, true);
-        if (!error && data.session) {
-          await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
-        }
+        const email = document.getElementById("auth-email").value.trim() || "guest";
+        const session = { email };
+        try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+        updateAuthUI(session);
+        await Promise.all([fetchOverallSummary(), loadCategorySummary()]);
       }
 
-      async function signup() {
-        if (!supabaseClient) return setAuthMessage("Authentication is still loading.", true);
-        const email = document.getElementById("auth-email").value.trim();
-        const password = document.getElementById("auth-password").value;
-        setAuthMessage("Creating your account...");
-        const { data, error } = await supabaseClient.auth.signUp({ email, password });
-        if (error) return setAuthMessage(error.message, true);
-        if (!data.session) {
-          setAuthMessage("Account created. Check your email to confirm your account, then log in.");
-        }
+      async function signup(event) {
+        // Sign up behaves exactly like login.
+        return login(event || { preventDefault() {} });
       }
 
       function apiErrorMessage(response, data, fallback) {
@@ -1687,8 +1649,18 @@
           });
           const data = await res.json();
           const transactions = data.parsed || data.transactions || [];
+          if (Array.isArray(data.rejected) && data.rejected.length > 0) {
+            alert(
+              `⚠️ ${data.rejected.length} item(s) could not be understood and were skipped:\n\n` +
+                data.rejected
+                  .map((r) => `• ${(r.errors || []).join(", ")}`)
+                  .join("\n"),
+            );
+          }
           if (transactions.length > 0) {
             window.onParseResults(transactions);
+          } else if (!data.success && data.error) {
+            alert("⚠️ " + data.error);
           }
         } catch (err) {
           alert("Error connecting to server: " + err.message);
@@ -1746,7 +1718,7 @@
         try {
           const res = await fetch(`${VOICE_URL}/categorize`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: backendHeaders(),
             body: JSON.stringify({ transactions }),
           });
           const data = await res.json();
@@ -1757,6 +1729,13 @@
         } catch (e) {
           console.error(e);
         }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
       }
 
       function renderCategoryCards(transactions) {
@@ -1781,10 +1760,10 @@
           }
 
           div.innerHTML = `
-          <div class="card-desc">${t.description}</div>
+          <div class="card-desc">${escapeHtml(t.description)}</div>
           <div class="card-bottom">
             <div class="card-amount ${amtClass}">₹${t.amount || 0}</div>
-            <div class="badge" style="background:${badgeColor}">${t.category}</div>
+            <div class="badge" style="background:${badgeColor}">${escapeHtml(t.category)}</div>
             <button class="edit-btn" id="edit-btn-${idx}" onclick="editCategory(${idx})">✎ Edit</button>
           </div>
           <div class="card-confidence" style="display:none;">
@@ -1831,7 +1810,7 @@
 
         fetch(`${VOICE_URL}/correct-category`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: backendHeaders(),
           body: JSON.stringify({
             transaction_id: tx.id || "",
             new_category: newCategory,

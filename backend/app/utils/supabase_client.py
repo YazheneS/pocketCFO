@@ -101,6 +101,16 @@ def get_authenticated_context(access_token: str) -> AuthenticatedContext:
     return AuthenticatedContext(client=client, user_id=user_id)
 
 
+# Authentication is disabled: every request acts as this single shared user.
+# (Must match the DEFAULT user_id in database/migrations/003_disable_auth.sql)
+DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def get_demo_context() -> AuthenticatedContext:
+    """Return the shared client and demo user used when auth is disabled."""
+    return AuthenticatedContext(client=SupabaseManager.get_client(), user_id=DEMO_USER_ID)
+
+
 def get_supabase_client() -> Client:
     """
     Dependency injection function for Supabase client.

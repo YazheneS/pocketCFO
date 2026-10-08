@@ -23,7 +23,7 @@ Install the dependencies from the project root:
 pip install -r requirements.txt
 ```
 
-Set `SUPABASE_URL`, `SUPABASE_KEY`, and `GROQ_API_KEY` in `.env`. The backend requires a valid Supabase Bearer token for transaction and chat requests; the current UI reads it from `localStorage.supabase_access_token`.
+Set `SUPABASE_URL`, `SUPABASE_KEY`, and `GROQ_API_KEY` in `.env`. Authentication is disabled: the login screen accepts any email/password, and the backend uses a single shared demo user. Run `database/migrations/003_disable_auth.sql` once in the Supabase SQL editor.
 
 The existing Supabase project remains the database. The canonical schema reference is [database/schema.sql](database/schema.sql). No local database is created.
 

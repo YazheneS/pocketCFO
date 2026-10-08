@@ -22,7 +22,7 @@ from backend.app.models.transaction_models import (
 from backend.app.services.transaction_service import TransactionService
 from backend.app.utils.supabase_client import (
     AuthenticatedContext,
-    get_authenticated_context,
+    get_demo_context,
 )
 from backend.app.utils.export_utils import (
     generate_csv_content,
@@ -38,30 +38,8 @@ router = APIRouter(
 
 
 def get_authenticated_context_dependency(request: Request) -> AuthenticatedContext:
-    authorization = request.headers.get("Authorization", "")
-    scheme, _, token = authorization.partition(" ")
-
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "success": False,
-                "message": "A valid Supabase Bearer token is required",
-                "error_code": "AUTHENTICATION_REQUIRED",
-            },
-        )
-
-    try:
-        return get_authenticated_context(token)
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "success": False,
-                "message": "The Supabase session is invalid or expired",
-                "error_code": "INVALID_AUTHENTICATION",
-            },
-        )
+    """Authentication is disabled: always act as the shared demo user."""
+    return get_demo_context()
 
 
 def get_transaction_service(
