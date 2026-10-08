@@ -1687,8 +1687,18 @@
           });
           const data = await res.json();
           const transactions = data.parsed || data.transactions || [];
+          if (Array.isArray(data.rejected) && data.rejected.length > 0) {
+            alert(
+              `⚠️ ${data.rejected.length} item(s) could not be understood and were skipped:\n\n` +
+                data.rejected
+                  .map((r) => `• ${(r.errors || []).join(", ")}`)
+                  .join("\n"),
+            );
+          }
           if (transactions.length > 0) {
             window.onParseResults(transactions);
+          } else if (!data.success && data.error) {
+            alert("⚠️ " + data.error);
           }
         } catch (err) {
           alert("Error connecting to server: " + err.message);
@@ -1746,7 +1756,7 @@
         try {
           const res = await fetch(`${VOICE_URL}/categorize`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: backendHeaders(),
             body: JSON.stringify({ transactions }),
           });
           const data = await res.json();
@@ -1757,6 +1767,13 @@
         } catch (e) {
           console.error(e);
         }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
       }
 
       function renderCategoryCards(transactions) {
@@ -1781,10 +1798,10 @@
           }
 
           div.innerHTML = `
-          <div class="card-desc">${t.description}</div>
+          <div class="card-desc">${escapeHtml(t.description)}</div>
           <div class="card-bottom">
             <div class="card-amount ${amtClass}">₹${t.amount || 0}</div>
-            <div class="badge" style="background:${badgeColor}">${t.category}</div>
+            <div class="badge" style="background:${badgeColor}">${escapeHtml(t.category)}</div>
             <button class="edit-btn" id="edit-btn-${idx}" onclick="editCategory(${idx})">✎ Edit</button>
           </div>
           <div class="card-confidence" style="display:none;">
@@ -1831,7 +1848,7 @@
 
         fetch(`${VOICE_URL}/correct-category`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: backendHeaders(),
           body: JSON.stringify({
             transaction_id: tx.id || "",
             new_category: newCategory,

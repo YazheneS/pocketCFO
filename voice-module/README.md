@@ -237,3 +237,20 @@ Update prompt in `parser.py` to add new parsing rules or improve accuracy.
 ## License
 
 Part of the pocketCFO project.
+
+
+## Validation & Database
+
+All parser output, categorizer output and request payloads are validated in `validators.py`
+before they are returned or saved:
+
+- `/parse` and `/categorize` return only schema-valid transactions, plus `rejected` (with reasons) and `warnings`.
+- `/save-transactions` is strict and all-or-nothing: any invalid item rejects the whole request (HTTP 400) and nothing is written. Only whitelisted columns are inserted.
+- `/save-transactions`, `/correct-category`, `/transactions`, `/categories/summary` and `/summary` require `Authorization: Bearer <supabase access token>`; row level security scopes data to that user.
+- Limits: 50 transactions per request, 1000 characters of input text.
+
+The tables `categorized_transactions` and `category_override_rules` are defined in
+`database/schema.sql`. Existing databases can apply just `database/migrations/002_categorization_tables.sql`
+(idempotent). Allowed categories/types/currencies in `validators.py` mirror the SQL CHECK constraints; change both together.
+
+Run tests: `cd voice-module && python -m pytest tests`

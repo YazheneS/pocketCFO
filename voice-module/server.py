@@ -1,4 +1,4 @@
-﻿import os
+import os
 import base64
 import binascii
 import json
@@ -11,30 +11,83 @@ from flask_cors import CORS
 
 from categorizer import apply_categorization, check_category_corrections, save_correction
 from supabase import create_client
+from validators import (
+    ValidationError,
+    to_db_row,
+    validate_correction_payload,
+    validate_query_filters,
+    validate_text_input,
+    validate_transaction,
+    validate_transactions,
+)
 
 app = Flask(__name__)
 CORS(app)
 
-supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
+def _bearer_token():
+    header = request.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip() or None
+    return None
+
+
+def get_supabase(require_user: bool = False):
+    """Return a Supabase client acting as the calling user.
+
+    The categorization tables use row level security (auth.uid() = user_id), so
+    queries must carry the user's JWT. Without a token the client is anonymous
+    and RLS returns/accepts nothing. ``require_user`` raises PermissionError
+    when no token was sent.
+    """
+    token = _bearer_token()
+    if require_user and not token:
+        raise PermissionError("Authentication required")
+    client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+    if token:
+        client.postgrest.auth(token)
+    return client
+
+
+def _rows(resp):
+    if isinstance(resp, dict):
+        return resp.get("data") or []
+    return getattr(resp, "data", None) or []
+
+
+@app.errorhandler(PermissionError)
+def _unauthorized(e):
+    return jsonify({"success": False, "error": str(e)}), 401
+
+
+def _bad_request(e: ValidationError):
+    return jsonify({"success": False, "error": "; ".join(e.errors), "errors": e.errors}), 400
 
 
 @app.route("/categorize", methods=["POST"])
 def categorize():
     try:
-        payload = request.get_json() or {}
-        transactions = payload.get("transactions")
-        if not transactions or not isinstance(transactions, list):
-            return jsonify({"success": False, "error": "transactions missing or empty"}), 400
+        payload = request.get_json(silent=True) or {}
+        try:
+            transactions, rejected, warnings = validate_transactions(payload.get("transactions"))
+        except ValidationError as e:
+            return _bad_request(e)
+        if not transactions:
+            return jsonify({"success": False, "error": "no valid transactions",
+                            "rejected": rejected}), 400
+
+        # Override rules are per user; anonymous callers just skip them.
+        supabase = get_supabase() if _bearer_token() else None
 
         to_categorize = []
         updated = []
         for tx in transactions:
-            desc = tx.get("description", "")
             corrected = None
-            try:
-                corrected = check_category_corrections(desc, supabase)
-            except Exception:
-                corrected = None
+            if supabase is not None:
+                try:
+                    corrected = check_category_corrections(tx["description"], supabase)
+                except Exception:
+                    corrected = None
             if corrected:
                 tx["category"] = corrected
                 tx["confidence_score"] = 1.0
@@ -43,125 +96,128 @@ def categorize():
                 to_categorize.append(tx)
 
         if to_categorize:
-            processed = apply_categorization(to_categorize)
-            updated.extend(processed)
+            updated.extend(apply_categorization(to_categorize))
 
-        return jsonify({"success": True, "transactions": updated, "count": len(updated)})
+        # Final contract check on everything we are about to hand back.
+        final, final_rejected, final_warnings = validate_transactions(updated)
+        rejected += final_rejected
+        warnings += final_warnings
+        return jsonify({"success": True, "transactions": final, "count": len(final),
+                        "rejected": rejected, "warnings": warnings})
     except Exception as e:
+        app.logger.exception("categorize failed")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/save-transactions", methods=["POST"])
 def save_transactions():
+    """All-or-nothing save. Strict validation: nothing is altered or dropped."""
     try:
-        payload = request.get_json() or {}
-        transactions = payload.get("transactions")
-        if not transactions or not isinstance(transactions, list):
-            return jsonify({"success": False, "error": "transactions missing or empty"}), 400
-
-        # Attempt batch insert
+        payload = request.get_json(silent=True) or {}
         try:
-            resp = supabase.table('categorized_transactions').insert(transactions).execute()
-            # normalize response
-            if isinstance(resp, dict):
-                rows = resp.get('data') or []
-            else:
-                rows = getattr(resp, 'data', None) or []
-            ids = [r.get('id') for r in rows if r.get('id')]
-        except Exception:
-            # Fallback to individual inserts
-            ids = []
-            for tx in transactions:
-                try:
-                    r = supabase.table('categorized_transactions').insert(tx).execute()
-                    if isinstance(r, dict):
-                        d = r.get('data') or []
-                        if d and isinstance(d, list):
-                            ids.append(d[0].get('id'))
-                    else:
-                        data = getattr(r, 'data', None) or []
-                        if data and isinstance(data, list):
-                            ids.append(data[0].get('id'))
-                except Exception:
-                    continue
+            valid, rejected, _ = validate_transactions(payload.get("transactions"), strict=True)
+        except ValidationError as e:
+            return _bad_request(e)
+        if rejected:
+            return jsonify({"success": False, "error": "validation failed; nothing was saved",
+                            "rejected": rejected}), 400
+
+        supabase = get_supabase(require_user=True)
+        rows = [to_db_row(tx) for tx in valid]  # whitelist: no id/user_id from the client
+        resp = supabase.table('categorized_transactions').insert(rows).execute()
+        ids = [r.get('id') for r in _rows(resp) if r.get('id')]
+        if len(ids) != len(rows):
+            app.logger.error("save-transactions: inserted %s of %s rows", len(ids), len(rows))
+            return jsonify({"success": False, "error": "save did not complete"}), 500
 
         return jsonify({"success": True, "saved": True, "count": len(ids), "ids": ids})
+    except PermissionError:
+        raise
     except Exception as e:
+        app.logger.exception("save-transactions failed")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/correct-category", methods=["POST"])
 def correct_category():
     try:
-        payload = request.get_json() or {}
-        transaction_id = payload.get("transaction_id")
-        new_category = payload.get("new_category")
-        keyword = payload.get("keyword")
-        if not transaction_id or not new_category:
-            return jsonify({"success": False, "error": "transaction_id and new_category required"}), 400
-
-        supabase.table('categorized_transactions').update({"category": new_category}).eq('id', transaction_id).execute()
-        # Save override rule for future
         try:
-            if keyword:
-                save_correction(keyword, new_category, supabase)
-        except Exception:
-            pass
+            data = validate_correction_payload(request.get_json(silent=True))
+        except ValidationError as e:
+            return _bad_request(e)
 
-        return jsonify({"success": True, "updated": True})
+        supabase = get_supabase(require_user=True)
+        updated = False
+        if data["transaction_id"]:
+            resp = (supabase.table('categorized_transactions')
+                    .update({"category": data["new_category"],
+                             "is_personal": data["new_category"] == "Personal"})
+                    .eq('id', data["transaction_id"]).execute())
+            if not _rows(resp):  # RLS hides other users' rows, so this is also an ownership check
+                return jsonify({"success": False, "error": "transaction not found"}), 404
+            updated = True
+
+        rule_saved = False
+        if data["keyword"]:
+            try:
+                save_correction(data["keyword"], data["new_category"], supabase)
+                rule_saved = True
+            except Exception:
+                app.logger.exception("could not save override rule")
+
+        return jsonify({"success": True, "updated": updated, "rule_saved": rule_saved})
+    except PermissionError:
+        raise
     except Exception as e:
+        app.logger.exception("correct-category failed")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
     try:
-        category = request.args.get('category')
-        ttype = request.args.get('type')
-        limit = int(request.args.get('limit') or 50)
+        try:
+            f = validate_query_filters(request.args)
+        except ValidationError as e:
+            return _bad_request(e)
 
-        query = supabase.table('categorized_transactions').select('*').order('created_at', {'ascending': False})
-        if category:
-            query = query.eq('category', category)
-        if ttype:
-            query = query.eq('type', ttype)
-        if limit:
-            query = query.limit(limit)
+        supabase = get_supabase(require_user=True)
+        query = supabase.table('categorized_transactions').select('*').order('created_at', desc=True)
+        if f.get("category"):
+            query = query.eq('category', f["category"])
+        if f.get("type"):
+            query = query.eq('type', f["type"])
+        query = query.limit(f["limit"])
 
-        resp = query.execute()
-        if isinstance(resp, dict):
-            rows = resp.get('data') or []
-        else:
-            rows = getattr(resp, 'data', None) or []
-
+        rows = _rows(query.execute())
         return jsonify({"success": True, "transactions": rows, "count": len(rows)})
+    except PermissionError:
+        raise
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @app.route("/categories/summary", methods=["GET"])
 def categories_summary():
     try:
-        resp = supabase.table('categorized_transactions').select('*').execute()
-        if isinstance(resp, dict):
-            rows = resp.get('data') or []
-        else:
-            rows = getattr(resp, 'data', None) or []
+        supabase = get_supabase(require_user=True)
+        rows = _rows(supabase.table('categorized_transactions').select('category,amount').execute())
 
         summary = {}
         for r in rows:
             cat = r.get('category') or 'Other'
-            amt = r.get('amount') or 0
-            try:
-                val = float(amt)
-            except Exception:
-                try:
-                    val = float(str(amt))
-                except Exception:
-                    val = 0
-            summary[cat] = summary.get(cat, 0) + val
+            summary[cat] = summary.get(cat, 0) + _to_float(r.get('amount'))
 
         return jsonify({"success": True, "summary": summary})
+    except PermissionError:
+        raise
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -169,42 +225,37 @@ def categories_summary():
 @app.route("/summary", methods=["GET"])
 def overall_summary():
     try:
-        date_filter = request.args.get('date')
-        query = supabase.table('categorized_transactions').select('*')
-        if date_filter:
-            query = query.eq('date', date_filter)
-        resp = query.execute()
-        if isinstance(resp, dict):
-            rows = resp.get('data') or []
-        else:
-            rows = getattr(resp, 'data', None) or []
+        try:
+            f = validate_query_filters(request.args)
+        except ValidationError as e:
+            return _bad_request(e)
+
+        supabase = get_supabase(require_user=True)
+        query = supabase.table('categorized_transactions').select('type,amount')
+        if f.get("date"):
+            query = query.eq('transaction_date', f["date"])
+        rows = _rows(query.execute())
 
         total_revenue = 0.0
         total_expenses = 0.0
         for r in rows:
-            amt = r.get('amount') or 0
-            try:
-                val = float(amt)
-            except Exception:
-                try:
-                    val = float(str(amt))
-                except Exception:
-                    val = 0
+            val = _to_float(r.get('amount'))
             ttype = (r.get('type') or '').lower()
             if ttype == 'income':
                 total_revenue += val
             elif ttype == 'expense':
                 total_expenses += val
-        net_profit = total_revenue - total_expenses
         return jsonify({
             "success": True,
             "summary": {
                 "total_revenue": total_revenue,
                 "total_expenses": total_expenses,
-                "net_profit": net_profit,
+                "net_profit": total_revenue - total_expenses,
                 "transaction_count": len(rows)
             }
         })
+    except PermissionError:
+        raise
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -251,9 +302,6 @@ def serve_index():
 
 
 @app.route("/<path:path>", methods=["GET"])
-
-
-@app.route("/<path:path>", methods=["GET"])
 def serve_static(path):
     if os.path.isfile(os.path.join(os.path.dirname(__file__), path)):
         return send_from_directory(os.path.dirname(__file__), path)
@@ -263,20 +311,24 @@ def serve_static(path):
 @app.route("/parse", methods=["POST"])
 def parse():
     try:
-        payload = request.get_json() or {}
-        text = payload.get("text", "").strip()
-        if not text:
-            return jsonify({"success": False, "error": "text is required"}), 400
+        payload = request.get_json(silent=True) or {}
+        try:
+            text = validate_text_input(payload.get("text"))
+        except ValidationError as e:
+            return _bad_request(e)
 
-        from parser import parse_transaction
-        parsed = parse_transaction(text)
+        from parser import parse_transaction_detailed
+        result = parse_transaction_detailed(text)
 
         return jsonify({
             "success": True,
-            "parsed": parsed,
-            "count": len(parsed)
+            "parsed": result["transactions"],
+            "count": len(result["transactions"]),
+            "rejected": result["rejected"],
+            "warnings": result["warnings"],
         })
     except Exception as e:
+        app.logger.exception("parse failed")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
