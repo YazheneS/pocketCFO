@@ -7,6 +7,7 @@ This module defines all HTTP endpoints for transaction management.
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response
 from datetime import date
 from typing import Optional
+from uuid import UUID
 from supabase import Client
 
 from backend.app.models.transaction_models import (
@@ -141,7 +142,7 @@ async def get_transactions(
 
 @router.get("/{transaction_id:uuid}", response_model=SingleTransactionResponse)
 async def get_transaction(
-    transaction_id: str,
+    transaction_id: UUID,
     service: TransactionService = Depends(get_transaction_service),
     user_id: str = Depends(get_user_id)
 ) -> SingleTransactionResponse:
@@ -160,7 +161,7 @@ async def get_transaction(
         HTTPException: If transaction not found
     """
     try:
-        transaction = await service.get_transaction_by_id(user_id, transaction_id)
+        transaction = await service.get_transaction_by_id(user_id, str(transaction_id))
         
         if not transaction:
             raise HTTPException(
@@ -233,7 +234,7 @@ async def create_transaction(
 
 @router.put("/{transaction_id:uuid}", response_model=SingleTransactionResponse)
 async def update_transaction(
-    transaction_id: str,
+    transaction_id: UUID,
     update_data: TransactionUpdate,
     service: TransactionService = Depends(get_transaction_service),
     user_id: str = Depends(get_user_id)
@@ -255,6 +256,7 @@ async def update_transaction(
     """
     try:
         # Check if transaction exists
+        transaction_id = str(transaction_id)
         existing = await service.get_transaction_by_id(user_id, transaction_id)
         if not existing:
             raise HTTPException(
@@ -289,7 +291,7 @@ async def update_transaction(
 
 @router.delete("/{transaction_id:uuid}", response_model=DeleteTransactionResponse)
 async def delete_transaction(
-    transaction_id: str,
+    transaction_id: UUID,
     service: TransactionService = Depends(get_transaction_service),
     user_id: str = Depends(get_user_id)
 ) -> DeleteTransactionResponse:
@@ -309,6 +311,7 @@ async def delete_transaction(
     """
     try:
         # Check if transaction exists
+        transaction_id = str(transaction_id)
         existing = await service.get_transaction_by_id(user_id, transaction_id)
         if not existing:
             raise HTTPException(

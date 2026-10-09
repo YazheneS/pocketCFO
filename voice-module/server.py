@@ -13,7 +13,6 @@ from categorizer import apply_categorization, check_category_corrections, save_c
 from supabase import create_client
 from validators import (
     ValidationError,
-    to_db_row,
     validate_correction_payload,
     validate_query_filters,
     validate_text_input,
@@ -23,6 +22,8 @@ from validators import (
 
 app = Flask(__name__)
 CORS(app)
+
+DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _bearer_token():
@@ -112,8 +113,16 @@ def save_transactions():
                             "rejected": rejected}), 400
 
         supabase = get_supabase(require_user=True)
-        rows = [to_db_row(tx) for tx in valid]  # whitelist: no id/user_id from the client
-        resp = supabase.table('categorized_transactions').insert(rows).execute()
+        rows = [{
+            "user_id": DEMO_USER_ID,
+            "description": tx["description"],
+            "amount": tx["amount"],
+            "type": tx["type"],
+            "category": tx["category"],
+            "transaction_date": tx["transaction_date"],
+            "is_personal": tx["is_personal"],
+        } for tx in valid]
+        resp = supabase.table('transactions').insert(rows).execute()
         ids = [r.get('id') for r in _rows(resp) if r.get('id')]
         if len(ids) != len(rows):
             app.logger.error("save-transactions: inserted %s of %s rows", len(ids), len(rows))
@@ -138,7 +147,7 @@ def correct_category():
         supabase = get_supabase(require_user=True)
         updated = False
         if data["transaction_id"]:
-            resp = (supabase.table('categorized_transactions')
+            resp = (supabase.table('transactions')
                     .update({"category": data["new_category"],
                              "is_personal": data["new_category"] == "Personal"})
                     .eq('id', data["transaction_id"]).execute())
@@ -171,7 +180,7 @@ def get_transactions():
             return _bad_request(e)
 
         supabase = get_supabase(require_user=True)
-        query = supabase.table('categorized_transactions').select('*').order('created_at', desc=True)
+        query = supabase.table('transactions').select('*').order('created_at', desc=True)
         if f.get("category"):
             query = query.eq('category', f["category"])
         if f.get("type"):
@@ -197,7 +206,7 @@ def _to_float(value):
 def categories_summary():
     try:
         supabase = get_supabase(require_user=True)
-        rows = _rows(supabase.table('categorized_transactions').select('category,amount').execute())
+        rows = _rows(supabase.table('transactions').select('category,amount').execute())
 
         summary = {}
         for r in rows:
@@ -220,7 +229,7 @@ def overall_summary():
             return _bad_request(e)
 
         supabase = get_supabase(require_user=True)
-        query = supabase.table('categorized_transactions').select('type,amount')
+        query = supabase.table('transactions').select('type,amount')
         if f.get("date"):
             query = query.eq('transaction_date', f["date"])
         rows = _rows(query.execute())

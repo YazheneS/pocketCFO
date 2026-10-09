@@ -79,8 +79,10 @@ def test_save_whitelists_columns(client, monkeypatch):
     sb = FakeSb([{"id": UUID}]); use(monkeypatch, sb)
     r = client.post("/save-transactions", json={"transactions": [{**TX, "user_id": "evil", "id": "x"}]}, headers=AUTH)
     assert r.status_code == 200 and r.get_json()["count"] == 1
+    assert next(e[1] for e in sb.log if e[0] == "table") == "transactions"
     row = first_call(sb, "insert")[0][0]
-    assert "user_id" not in row and "id" not in row and "date" not in row
+    assert row["user_id"] == server.DEMO_USER_ID
+    assert "id" not in row and "date" not in row and "currency" not in row
 
 
 def test_save_fails_loudly_on_partial_insert(client, monkeypatch):

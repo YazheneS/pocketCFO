@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 Set `SUPABASE_URL`, `SUPABASE_KEY`, and `GROQ_API_KEY` in `.env`. Authentication is disabled: the login screen accepts any email/password, and the backend uses a single shared demo user. Run `database/migrations/003_disable_auth.sql` once in the Supabase SQL editor.
 
-The existing Supabase project remains the database. The canonical schema reference is [database/schema.sql](database/schema.sql). No local database is created.
+The existing Supabase project remains the database. The canonical schema reference is [database/schema.sql](database/schema.sql). No local database is created. For an existing project, run `database/migrations/003_disable_auth.sql` and then `database/migrations/004_unify_transaction_storage.sql` in the Supabase SQL editor; the latter moves existing voice-module records into the shared transaction account.
 
 ## Run locally
 

@@ -20,18 +20,23 @@ load_dotenv()
 _original_httpx_client = httpx.Client
 _original_httpx_async_client = httpx.AsyncClient
 
-def _patched_httpx_client(*args, **kwargs):
-    """Patched httpx.Client that disables HTTP/2."""
-    kwargs['http2'] = False
-    return _original_httpx_client(*args, **kwargs)
+class _PatchedHttpxClient(_original_httpx_client):
+    """httpx.Client subclass that disables HTTP/2."""
 
-def _patched_httpx_async_client(*args, **kwargs):
-    """Patched httpx.AsyncClient that disables HTTP/2."""
-    kwargs['http2'] = False
-    return _original_httpx_async_client(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        kwargs['http2'] = False
+        super().__init__(*args, **kwargs)
 
-httpx.Client = _patched_httpx_client
-httpx.AsyncClient = _patched_httpx_async_client
+
+class _PatchedHttpxAsyncClient(_original_httpx_async_client):
+    """httpx.AsyncClient subclass that disables HTTP/2."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs['http2'] = False
+        super().__init__(*args, **kwargs)
+
+httpx.Client = _PatchedHttpxClient
+httpx.AsyncClient = _PatchedHttpxAsyncClient
 
 
 class SupabaseManager:

@@ -54,6 +54,26 @@ TRANSACTION_HISTORY_PHRASES = (
     "transaction history",
     "recent transactions",
 )
+TRANSACTION_KEYWORDS = (
+    "transaction",
+    "transactions",
+    "expense",
+    "expenses",
+    "income",
+    "revenue",
+    "earning",
+    "earnings",
+    "spending",
+    "spent",
+    "purchase",
+    "purchases",
+    "bought",
+    "sold",
+    "profit",
+    "balance",
+    "payment",
+    "payments",
+)
 
 
 def normalize_message(message: str) -> str:
@@ -87,6 +107,7 @@ def is_transaction_question(message: str) -> bool:
         or contains_phrase(normalized_message, INCOME_QUERY_PHRASES)
         or contains_phrase(normalized_message, BALANCE_QUERY_PHRASES)
         or contains_phrase(normalized_message, TRANSACTION_HISTORY_PHRASES)
+        or contains_phrase(normalized_message, TRANSACTION_KEYWORDS)
     )
 
 
